@@ -43,9 +43,8 @@ export function toToolContent(blocks: readonly McpContentBlock[], notes: readonl
     }
     return [{ type: "text", text: JSON.stringify(block) }]
   })
-  for (const note of notes) content.push({ type: "text", text: `Note: ${note}` })
   if (content.length === 0) content.push({ type: "text", text: "(no output)" })
-  return content
+  return [...notes.map((note): ToolContent => ({ type: "text", text: `Note: ${note}` })), ...content]
 }
 
 /** Joins the text blocks, for surfacing a failed call as a tool error. */

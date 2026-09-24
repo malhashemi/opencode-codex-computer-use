@@ -21,8 +21,11 @@ describe("toToolContent", () => {
     expect(imageMime("unknown", "image/webp")).toBe("image/webp")
   })
 
-  test("appends notes and never returns empty content", () => {
-    expect(toToolContent([], ["restarted"])).toEqual([{ type: "text", text: "Note: restarted" }])
+  test("puts notes first and never returns empty content", () => {
+    expect(toToolContent([{ type: "text", text: "state" }], ["restarted"])).toEqual([
+      { type: "text", text: "Note: restarted" },
+      { type: "text", text: "state" },
+    ])
     expect(toToolContent([])).toEqual([{ type: "text", text: "(no output)" }])
   })
 
@@ -42,7 +45,7 @@ describe("parseOptions", () => {
     expect(parseOptions({})).toEqual({
       codexPath: undefined,
       approvals: "codex",
-      idleShutdownMs: 600_000,
+      idleShutdownMs: 0,
       callTimeoutMs: 300_000,
     })
   })

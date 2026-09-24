@@ -37,7 +37,7 @@ export function parseOptions(raw: PluginOptions): Options {
   return {
     codexPath: typeof raw.codexPath === "string" && raw.codexPath.trim() ? raw.codexPath.trim() : undefined,
     approvals,
-    idleShutdownMs: minutes(raw.idleShutdownMinutes, 10),
+    idleShutdownMs: minutes(raw.idleShutdownMinutes, 0),
     callTimeoutMs: seconds(raw.callTimeoutSeconds, 300),
   }
 }
@@ -86,7 +86,7 @@ export default Plugin.define({
             callID: context.id,
           })
           if (result.isError) {
-            throw new Error([textOf(result.content) || "Computer Use call failed", ...result.notes].join("\n"))
+            throw new Error([...result.notes, textOf(result.content) || "Computer Use call failed"].join("\n"))
           }
           const surface = result.meta?.["codex/toolSurface"] as { app?: { appId?: string } } | undefined
           return {

@@ -59,7 +59,7 @@ With options:
       "package": "/absolute/path/to/opencode-codex-computer-use",
       "options": {
         "approvals": "codex",
-        "idleShutdownMinutes": 10,
+        "idleShutdownMinutes": 0,
       },
     },
   ],
@@ -69,7 +69,7 @@ With options:
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `approvals` | `"codex"` | How "Allow Computer Use to use *App*?" prompts are answered. `"codex"` follows the `approval_policy` in your `~/.codex/config.toml` (with `"never"`, Codex answers them itself; any prompt Codex still forwards is declined). `"accept-session"` accepts each prompt for the current session only. `"decline"` declines them all. Apps blocked by the engine or your organization stay blocked in every mode. |
-| `idleShutdownMinutes` | `10` | Stop the background Codex process after this long without Computer Use calls. `0` keeps it running until OpenCode stops. |
+| `idleShutdownMinutes` | `0` (never) | Stop the background Codex process after this many minutes without Computer Use calls. The default keeps it running until OpenCode stops, so work can wait indefinitely for you (for example, a login in a tab the agent handed over). |
 | `callTimeoutSeconds` | `300` | Maximum time for one `computer_use` call. |
 | `codexPath` | auto | Path to `codex`. Otherwise `$OPENCODE_CODEX_COMPUTER_USE_CODEX_PATH`, then the ChatGPT app, then the Codex app, then `PATH`. |
 
@@ -128,8 +128,9 @@ OpenCode ── computer_use tool
   as Codex does for its own tool calls); the browser surface requires it. When an OpenCode turn finishes or is
   interrupted, the plugin tells Computer Use the turn ended, which also cleans up agent-created Chrome tabs. Deleting
   an OpenCode session closes its Codex thread.
-- **Idle:** after `idleShutdownMinutes` the Codex process stops. The next call starts it again and tells the model its
-  earlier JavaScript variables are gone.
+- **Lifetime:** the Codex process keeps running between calls, so JavaScript variables survive long waits. If it
+  stops anyway (an optional `idleShutdownMinutes`, a crash, or a ChatGPT update), the next call starts it again and
+  tells the model, before anything else, that its earlier variables are gone.
 
 ## Privacy
 
