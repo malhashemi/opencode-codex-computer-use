@@ -1,7 +1,7 @@
 # opencode-codex-computer-use
 
-An [OpenCode](https://opencode.ai) plugin that lets your OpenCode agent operate native macOS apps with the
-**Codex Computer Use engine that is already installed on your Mac** by the ChatGPT (or Codex) desktop app.
+An [OpenCode](https://opencode.ai) plugin that lets your OpenCode agent operate native macOS apps and Chrome tabs with
+the **Codex Computer Use engine that is already installed on your Mac** by the ChatGPT (or Codex) desktop app.
 
 It does not reimplement, copy, patch or bundle anything from OpenAI. It talks to Codex through Codex's public
 [app-server protocol](https://github.com/openai/codex/tree/main/codex-rs/app-server-protocol), and Codex runs its own
@@ -21,6 +21,7 @@ Nothing in Codex has to be configured by hand. You only need a working Computer 
 | **ChatGPT desktop app** (or the Codex desktop app) in `/Applications`, **signed in** | It ships the `codex` binary and the Computer Use runtime this plugin uses. Computer Use must be available for your account and region. |
 | **Computer Use turned on** in the app (Settings → Computer Use) | This installs `~/.codex/computer-use/Codex Computer Use.app` and registers Codex's `cua_repl` runtime in `~/.codex`. |
 | **Accessibility** and **Screen Recording** granted to *Codex Computer Use* (System Settings → Privacy & Security) | macOS asks the first time Computer Use runs. Easiest: ask Codex to do one small Computer Use task first. |
+| *Optional, for Chrome tabs:* the **ChatGPT for Chrome** extension, connected | Set up from the ChatGPT/Codex app (Chrome plugin). Without it, native apps still work and the agent can only drive Chrome as an ordinary app. |
 
 The ChatGPT app does not need to be open while you use OpenCode.
 
@@ -31,7 +32,8 @@ bun install
 bun scripts/smoke.ts
 ```
 
-It reads Finder's UI and takes one screenshot (read-only), then prints `OK` or what is missing. You can also run
+It reads Finder's UI, takes one screenshot and lists the connected browsers (all read-only), then prints `OK` or
+what is missing. You can also run
 `/Applications/ChatGPT.app/Contents/Resources/codex mcp list` and look for an enabled `cua_repl` server.
 
 ## Install in OpenCode
@@ -91,11 +93,20 @@ call, or to turn it off, add a rule:
 | `computer_use` | Runs JavaScript in Codex's Computer Use runtime, where a `cua` object is preloaded, and returns text output, accessibility trees and screenshots. Variables persist between calls in the same OpenCode session. |
 | `computer_use_reset` | Clears that runtime for the current session. |
 
-A typical first call:
+The same runtime covers both surfaces, as it does in Codex:
 
 ```js
+// Native apps
 let app = await cua.getApp("Notes") // name, bundle ID or path; returns the app's accessibility tree
+
+// Chrome tabs (needs the ChatGPT for Chrome extension)
+let browser = await cua.getBrowser()
+let tab = await cua.createBrowserTab(browser.browserId, "https://example.com")
 ```
+
+Tabs work on the page itself and add `goto`, `back`, `reload`, `close` and Playwright-style locators. Tabs the agent
+creates close automatically when the OpenCode turn ends, unless the agent marks them to keep (`tab.markDeliverable()`).
+Keys and typing go to the bound app or tab, so system-wide shortcuts such as Spotlight are not available.
 
 The first call in each session also returns the engine's full API reference to the model, so the plugin does not
 need to ship OpenAI's documentation.
@@ -113,15 +124,17 @@ OpenCode ── computer_use tool
   in the ChatGPT/Codex thread list, and no model turn runs in Codex. Only routine Codex diagnostic log lines are written.
 - **What you see:** the apps being operated (apps that are not running are launched in the background) and Computer
   Use's own on-screen indicator while it acts ("ChatGPT is using your computer — Esc to cancel").
-- **End of a turn:** when an OpenCode turn finishes or is interrupted, the plugin tells Computer Use the turn ended,
-  as Codex does. Deleting an OpenCode session closes its Codex thread.
+- **Turns:** each call carries the Codex thread ID and an ID for the current OpenCode turn (in the request's `_meta`,
+  as Codex does for its own tool calls); the browser surface requires it. When an OpenCode turn finishes or is
+  interrupted, the plugin tells Computer Use the turn ended, which also cleans up agent-created Chrome tabs. Deleting
+  an OpenCode session closes its Codex thread.
 - **Idle:** after `idleShutdownMinutes` the Codex process stops. The next call starts it again and tells the model its
   earlier JavaScript variables are gone.
 
 ## Privacy
 
-Computer Use reads the UI and screenshots of the apps it operates, and those are sent to **your OpenCode model
-provider** as tool results. OpenAI's Computer Use component also sends its own usage telemetry to OpenAI, as it does
+Computer Use reads the UI and screenshots of the apps and pages it operates, and those are sent to **your OpenCode
+model provider** as tool results. In Chrome it works in your real profile, with your logged-in sessions. OpenAI's Computer Use component also sends its own usage telemetry to OpenAI, as it does
 inside ChatGPT; your ChatGPT settings govern that.
 
 ## Troubleshooting
@@ -132,6 +145,7 @@ inside ChatGPT; your ChatGPT settings govern that.
 | `Codex has no cua_repl MCP server` | Turn on Computer Use in the ChatGPT/Codex app, then run `bun scripts/smoke.ts` again. |
 | Permission errors from the engine | Grant Accessibility and Screen Recording to *Codex Computer Use*, then retry. |
 | `Declined "Allow Computer Use to use …"` | Approve the app once in ChatGPT/Codex, or set `approvals` to `"accept-session"`. |
+| No browsers listed / Chrome tab calls fail | Install and connect the ChatGPT for Chrome extension from the ChatGPT/Codex app, keep Chrome running, then run `bun scripts/smoke.ts`. |
 | Plugin logs | Lines prefixed `[codex-computer-use]` in `~/.local/share/opencode/log/opencode.log`. |
 
 ## Development

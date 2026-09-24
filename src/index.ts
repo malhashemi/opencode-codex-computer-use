@@ -7,11 +7,12 @@ const LOG_PREFIX = "[codex-computer-use]"
 
 export const PERMISSION_ACTION = "computer_use"
 
-const DESCRIPTION = `Operate native macOS apps through the Codex Computer Use engine installed with the ChatGPT/Codex desktop app.
+const DESCRIPTION = `Operate native macOS apps and Chrome tabs through the Codex Computer Use engine installed with the ChatGPT/Codex desktop app.
 
 Runs JavaScript in a persistent runtime (per OpenCode session) where a \`cua\` object is preloaded. Variables persist between calls.
-- Bind an app by name, bundle ID or path: \`let app = await cua.getApp("Notes")\`. The result includes the app's accessibility tree, where each UI element has a numeric index. Apps that are not running are launched in the background.
-- Act on elements by index where possible (e.g. \`await app.click(12)\`, \`await app.setValue(5, "text")\`), then type or press keys with \`app.typeText(...)\` / \`app.pressKey("super+c")\`.
+- Native apps: \`let app = await cua.getApp("Notes")\` (name, bundle ID or path). The result includes the app's accessibility tree, where each UI element has a numeric index. Apps that are not running are launched in the background.
+- Web pages: prefer browser tabs over driving the Chrome app. Open one with \`let browser = await cua.getBrowser(); let tab = await cua.createBrowserTab(browser.browserId, "https://example.com")\`, or bind an open tab with \`cua.getTab({ url })\`. Tabs add \`goto\`, \`back\`, \`reload\` and \`close\`. Chrome tabs need the ChatGPT for Chrome extension.
+- Act on elements by index where possible (e.g. \`await app.click(12)\`, \`await app.setValue(5, "text")\`), then type or press keys with \`app.typeText(...)\` / \`app.pressKey("super+c")\` (tabs take an element index first: \`tab.typeText(7, "hi")\`). Keys go to the bound app or tab, so system-wide shortcuts such as Spotlight do not work.
 - Re-read with \`await app.getAXState()\` (returns only what changed) or \`await app.getScreenshot({ emit: true })\` when the tree is not enough.
 - Print values with \`nodeRepl.write(...)\` (strings only; use JSON.stringify for objects).
 - The first call in a session also returns the engine's full API reference. Read it before acting.
@@ -82,7 +83,7 @@ export default Plugin.define({
           await context.progress({ status: "running" })
           const result = await bridge.run(context.sessionID, code, {
             signal: context.signal,
-            turnID: context.messageID,
+            callID: context.id,
           })
           if (result.isError) {
             throw new Error([textOf(result.content) || "Computer Use call failed", ...result.notes].join("\n"))

@@ -62,6 +62,13 @@ describe("ComputerUseBridge", () => {
     expect(calls("thread/start")).toHaveLength(1)
   })
 
+  test("browser calls satisfy the runtime's turn-metadata requirement", async () => {
+    const { bridge } = setup()
+    const result = await bridge.run("ses_a", "BROWSER")
+    expect(result.isError).toBe(false)
+    expect(text(result)).toContain('"type":"extension"')
+  })
+
   test("returns screenshots and tool metadata", async () => {
     const { bridge } = setup()
     const result = await bridge.run("ses_a", "IMAGE")
@@ -105,13 +112,36 @@ describe("ComputerUseBridge", () => {
   test("sends turn_ended once per turn that used Computer Use", async () => {
     const { bridge, calls } = setup()
     await bridge.endTurn("ses_a", "Stop")
-    await bridge.run("ses_a", "x", { turnID: "msg_1" })
+    await bridge.run("ses_a", "x")
     await bridge.endTurn("ses_a", "Stop")
     await bridge.endTurn("ses_a", "Stop")
 
+    const js = calls("mcpServer/tool/call").find((call) => call.params.tool === "js")
     const ended = calls("mcpServer/tool/call").filter((call) => call.params.tool === "turn_ended")
     expect(ended).toHaveLength(1)
-    expect(ended[0].params.arguments).toEqual({ hook_event_name: "Stop", session_id: "thread-1", turn_id: "msg_1" })
+    expect(ended[0].params.arguments).toEqual({
+      hook_event_name: "Stop",
+      session_id: "thread-1",
+      turn_id: js.params._meta["x-codex-turn-metadata"].turn_id,
+    })
+  })
+
+  test("attaches Codex turn metadata, stable within a turn and new for the next turn", async () => {
+    const { bridge, calls } = setup()
+    await bridge.run("ses_a", "a", { callID: "call_1" })
+    await bridge.run("ses_a", "b", { callID: "call_2" })
+    await bridge.endTurn("ses_a", "Stop")
+    await bridge.run("ses_a", "c")
+
+    const metas = calls("mcpServer/tool/call")
+      .filter((call) => call.params.tool === "js")
+      .map((call) => call.params._meta["x-codex-turn-metadata"])
+    expect(metas[0]).toMatchObject({ session_id: "thread-1", thread_id: "thread-1", call_id: "call_1" })
+    expect(metas[0].turn_id).toMatch(/^[0-9a-f-]{36}$/)
+    expect(metas[1].turn_id).toBe(metas[0].turn_id)
+    expect(metas[1].call_id).toBe("call_2")
+    expect(metas[2].turn_id).not.toBe(metas[0].turn_id)
+    expect(metas[2].call_id).toBeUndefined()
   })
 
   test("closing a session ends the turn and unsubscribes its thread", async () => {

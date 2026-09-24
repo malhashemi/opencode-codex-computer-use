@@ -51,6 +51,13 @@ async function toolCall(id: number, params: any) {
   if (params.tool !== "js") return send({ id, result: { content: [{ type: "text", text: "{}" }] } })
   const code: string = params.arguments.code
   if (code.includes("EXIT")) process.exit(1)
+  if (code.includes("BROWSER")) {
+    const meta = params._meta?.["x-codex-turn-metadata"]
+    if (!meta?.session_id || !meta?.turn_id) {
+      return send({ id, result: { isError: true, content: [{ type: "text", text: "Missing required Codex turn metadata: session_id, turn_id" }] } })
+    }
+    return send({ id, result: { content: [{ type: "text", text: 'BROWSERS=[{"id":"1","name":"Chrome","type":"extension"}]' }] } })
+  }
   if (code.includes("THROW")) {
     return send({ id, result: { isError: true, content: [{ type: "text", text: "ReferenceError: boom" }] } })
   }

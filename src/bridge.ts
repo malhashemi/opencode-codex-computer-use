@@ -56,7 +56,8 @@ interface SessionState {
   resolvedThreadID?: string
   /** Computer Use ran since the last `turn_ended`. */
   dirty: boolean
-  lastTurnID?: string
+  /** Generated on the first call of an OpenCode turn and cleared when the turn ends. */
+  turnID?: string
 }
 
 export class ComputerUseBridge {
@@ -75,7 +76,7 @@ export class ComputerUseBridge {
   async run(
     sessionID: string,
     code: string,
-    input: { signal?: AbortSignal; turnID?: string } = {},
+    input: { signal?: AbortSignal; callID?: string } = {},
   ): Promise<RunResult> {
     return this.busy(async () => {
       const client = await this.ensureClient()
@@ -83,14 +84,14 @@ export class ComputerUseBridge {
       const state = this.sessions.get(sessionID)
       if (state) {
         state.dirty = true
-        state.lastTurnID = input.turnID ?? state.lastTurnID
+        state.turnID ??= crypto.randomUUID()
       }
 
       const notes: string[] = []
       if (this.restartedSessions.delete(sessionID)) {
         notes.push(
           "The Computer Use runtime was restarted since the previous call, so JavaScript variables from earlier calls " +
-            "(such as `app`) no longer exist. Bind them again, for example `let app = await cua.getApp(\"Notes\")`.",
+            "(such as `app` or `tab`) no longer exist. Bind them again, for example `let app = await cua.getApp(\"Notes\")`.",
         )
       }
 
@@ -99,7 +100,13 @@ export class ComputerUseBridge {
       try {
         const result = await client.request(
           "mcpServer/tool/call",
-          { threadId: threadID, server: CUA_SERVER, tool: "js", arguments: { code } },
+          {
+            threadId: threadID,
+            server: CUA_SERVER,
+            tool: "js",
+            arguments: { code },
+            _meta: turnMetadata(threadID, state?.turnID, input.callID),
+          },
           { signal: input.signal, timeoutMs: this.options.callTimeoutMs },
         )
         notes.push(...this.takeApprovalNotes(threadID))
@@ -140,7 +147,9 @@ export class ComputerUseBridge {
     const client = this.client
     if (!state?.dirty || !state.resolvedThreadID || !client || client.closed || state.generation !== this.generation)
       return
+    const turnID = state.turnID ?? "opencode"
     state.dirty = false
+    state.turnID = undefined
     try {
       await client.request(
         "mcpServer/tool/call",
@@ -151,8 +160,9 @@ export class ComputerUseBridge {
           arguments: {
             hook_event_name: kind,
             session_id: state.resolvedThreadID,
-            turn_id: state.lastTurnID ?? "opencode",
+            turn_id: turnID,
           },
+          _meta: turnMetadata(state.resolvedThreadID, turnID),
         },
         { timeoutMs: 10_000 },
       )
@@ -333,6 +343,22 @@ export class ComputerUseBridge {
     const wrapped = new Error([base.message, ...notes].join("\n"))
     wrapped.name = base.name
     return wrapped
+  }
+}
+
+/**
+ * Per-call metadata Codex attaches to MCP tool calls during a turn. The browser surface of `cua_repl` requires
+ * `session_id` and `turn_id`; `call_id` links approval prompts to the originating tool call.
+ */
+export function turnMetadata(threadID: string, turnID: string | undefined, callID?: string) {
+  if (!turnID) return undefined
+  return {
+    "x-codex-turn-metadata": {
+      session_id: threadID,
+      thread_id: threadID,
+      turn_id: turnID,
+      ...(callID ? { call_id: callID } : {}),
+    },
   }
 }
 

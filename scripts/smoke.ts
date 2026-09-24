@@ -36,6 +36,19 @@ try {
   console.log(`getScreenshot(): ${image ? `${imageMime(image.data ?? "", image.mimeType)}, ${size} KB` : "no image"}`)
   if (!image) throw new Error("no screenshot returned")
 
+  const browsers = await bridge.run(
+    "smoke",
+    'let bs = await cua.listBrowsers({ emit: false });\nnodeRepl.write("BROWSERS=" + JSON.stringify(bs.map(b => `${b.name ?? b.id} (${b.type})`)));',
+  )
+  const listed = browsers.content.map((block) => block.text ?? "").join("\n")
+  const match = listed.match(/BROWSERS=(.*)/)
+  if (browsers.isError || !match) {
+    console.log(`listBrowsers(): unavailable (${listed.split("\n").find(Boolean) ?? "no output"})`)
+  } else {
+    const names: string[] = JSON.parse(match[1]!)
+    console.log(`listBrowsers(): ${names.length ? names.join(", ") : "none (install the ChatGPT for Chrome extension for Chrome tabs)"}`)
+  }
+
   await bridge.endTurn("smoke", "Stop")
   console.log("\nOK: Codex Computer Use is reachable from this machine.")
 } catch (error) {
