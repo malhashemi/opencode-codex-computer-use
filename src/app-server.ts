@@ -35,6 +35,8 @@ export interface AppServerHandlers {
   onNotification?: (method: string, params: any) => void
   onExit?: (code: number | null, signal: NodeJS.Signals | null) => void
   onStderr?: (line: string) => void
+  /** Every JSON-RPC message sent or received, for debugging. */
+  onTraffic?: (direction: "send" | "receive", message: unknown) => void
 }
 
 export interface RequestOptions {
@@ -164,6 +166,7 @@ export class AppServerClient {
 
   private write(message: unknown): void {
     if (this.exited || !this.child.stdin.writable) return
+    this.handlers.onTraffic?.("send", message)
     this.child.stdin.write(JSON.stringify(message) + "\n")
   }
 
@@ -175,6 +178,7 @@ export class AppServerClient {
       return
     }
     if (message === null || typeof message !== "object") return
+    this.handlers.onTraffic?.("receive", message)
 
     const isResponse = message.id !== undefined && ("result" in message || "error" in message) && !message.method
     if (isResponse) {

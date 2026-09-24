@@ -21,6 +21,10 @@ export interface BridgeOptions {
   cwd: string
   version: string
   log: (message: string) => void
+  /** JavaScript run before the model's code on every call (see `surfaceGuard`). */
+  codePrefix?: string
+  /** Receives every app-server message, for the optional debug log. */
+  onTraffic?: (direction: "send" | "receive", message: unknown) => void
 }
 
 export interface McpContentBlock {
@@ -46,9 +50,9 @@ export class SetupError extends Error {
 }
 
 export const SETUP_HELP =
-  "Codex Computer Use needs: macOS 14.4+ on Apple Silicon, the ChatGPT (or Codex) desktop app installed and signed in, " +
-  "and Computer Use enabled in that app with Accessibility and Screen Recording granted. " +
-  "See the opencode-codex-computer-use README."
+  "Codex Computer Use needs the ChatGPT (or Codex) desktop app installed and signed in, with Computer Use enabled " +
+  "(on macOS: 14.4+ on Apple Silicon, with Accessibility and Screen Recording granted). " +
+  "Run /computer-use-doctor or see the opencode-codex-computer-use README."
 
 interface SessionState {
   readonly generation: number
@@ -104,7 +108,7 @@ export class ComputerUseBridge {
             threadId: threadID,
             server: CUA_SERVER,
             tool: "js",
-            arguments: { code },
+            arguments: { code: this.options.codePrefix ? `${this.options.codePrefix}\n${code}` : code },
             _meta: turnMetadata(threadID, state?.turnID, input.callID),
           },
           { signal: input.signal, timeoutMs: this.options.callTimeoutMs },
@@ -186,6 +190,26 @@ export class ComputerUseBridge {
       .catch((error) => this.options.log(`thread/unsubscribe failed: ${describe(error)}`))
   }
 
+  /** Names of the MCP servers Codex has loaded for the session's thread, for diagnostics. */
+  async serverNames(sessionID: string): Promise<string[]> {
+    return this.busy(async () => {
+      const client = await this.ensureClient()
+      const threadID = await this.thread(sessionID, client)
+      const response = await client.request(
+        "mcpServerStatus/list",
+        { threadId: threadID, detail: "toolsAndAuthOnly" },
+        { timeoutMs: 30_000 },
+      )
+      return Array.isArray(response?.data)
+        ? response.data.map((server: { name?: unknown }) => String(server?.name ?? ""))
+        : []
+    })
+  }
+
+  get codexPath(): string | undefined {
+    return resolveCodexPath(this.options.codexPath)
+  }
+
   async dispose(): Promise<void> {
     this.disposed = true
     clearTimeout(this.idleTimer)
@@ -231,7 +255,7 @@ export class ComputerUseBridge {
       if (!codexPath) {
         throw new SetupError(
           `Could not find the \`codex\` executable (looked at the \`codexPath\` option, $${CODEX_PATH_ENV}, ` +
-            `${BUNDLED_CODEX_PATHS.join(", ")}, and PATH). ${SETUP_HELP}`,
+            `${[...BUNDLED_CODEX_PATHS, "PATH"].join(", ")}). ${SETUP_HELP}`,
         )
       }
       const generation = this.generation + 1
@@ -241,6 +265,7 @@ export class ComputerUseBridge {
         handlers: {
           onServerRequest: (method, params) => this.answerServerRequest(method, params),
           onExit: (code, signal) => this.handleExit(generation, code, signal),
+          onTraffic: this.options.onTraffic,
         },
       })
       this.generation = generation

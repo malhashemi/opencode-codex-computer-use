@@ -19,9 +19,6 @@
     "computer-use",
     "macos"
   ],
-  "os": [
-    "darwin"
-  ],
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "bun test"

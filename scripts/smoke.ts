@@ -1,60 +1,24 @@
 #!/usr/bin/env bun
-// Read-only check that the installed Codex Computer Use engine is reachable: reads Finder's UI and takes a screenshot.
-// Usage: bun scripts/smoke.ts [path/to/codex]
+// Read-only setup check, the same as OpenCode's /computer-use-doctor command.
+// Usage: bun scripts/smoke.ts [path/to/codex] [--ocr]
 import { ComputerUseBridge } from "../src/bridge"
-import { resolveCodexPath } from "../src/codex-path"
-import { imageMime } from "../src/content"
+import { runDoctor } from "../src/doctor"
+import { parseOptions } from "../src/options"
 
-const codexPath = resolveCodexPath(process.argv[2])
-console.log(`codex: ${codexPath ?? "not found"}`)
-
+const args = process.argv.slice(2)
+const options = parseOptions({
+  codexPath: args.find((arg) => !arg.startsWith("--")),
+  screenshots: args.includes("--ocr") ? "both" : "image",
+})
 const bridge = new ComputerUseBridge({
-  codexPath,
-  approvals: "codex",
+  ...options,
   idleShutdownMs: 0,
-  callTimeoutMs: 120_000,
   cwd: process.cwd(),
   version: "smoke",
-  log: (message) => console.log(`  ${message}`),
+  log: () => {},
 })
 
-let failed = false
-try {
-  const started = performance.now()
-  const state = await bridge.run(
-    "smoke",
-    'let app = await cua.getApp("Finder");\nnodeRepl.write("bound Finder");',
-  )
-  const text = state.content.map((block) => block.text ?? "").join("\n")
-  const elements = text.match(/^\s*\d+ /gm)?.length ?? 0
-  console.log(`getApp("Finder"): ${Math.round(performance.now() - started)} ms, ${elements} UI elements, error=${state.isError}`)
-  if (state.isError || elements === 0) throw new Error(text.slice(0, 2_000))
-
-  const shot = await bridge.run("smoke", "await app.getScreenshot({ emit: true });")
-  const image = shot.content.find((block) => block.type === "image")
-  const size = Math.round(((image?.data?.length ?? 0) * 3) / 4 / 1024)
-  console.log(`getScreenshot(): ${image ? `${imageMime(image.data ?? "", image.mimeType)}, ${size} KB` : "no image"}`)
-  if (!image) throw new Error("no screenshot returned")
-
-  const browsers = await bridge.run(
-    "smoke",
-    'let bs = await cua.listBrowsers({ emit: false });\nnodeRepl.write("BROWSERS=" + JSON.stringify(bs.map(b => `${b.name ?? b.id} (${b.type})`)));',
-  )
-  const listed = browsers.content.map((block) => block.text ?? "").join("\n")
-  const match = listed.match(/BROWSERS=(.*)/)
-  if (browsers.isError || !match) {
-    console.log(`listBrowsers(): unavailable (${listed.split("\n").find(Boolean) ?? "no output"})`)
-  } else {
-    const names: string[] = JSON.parse(match[1]!)
-    console.log(`listBrowsers(): ${names.length ? names.join(", ") : "none (install the ChatGPT for Chrome extension for Chrome tabs)"}`)
-  }
-
-  await bridge.endTurn("smoke", "Stop")
-  console.log("\nOK: Codex Computer Use is reachable from this machine.")
-} catch (error) {
-  failed = true
-  console.error(`\nFAILED: ${error instanceof Error ? error.message : String(error)}`)
-} finally {
-  await bridge.dispose()
-}
-process.exit(failed ? 1 : 0)
+const report = await runDoctor(bridge, options, "smoke")
+await bridge.dispose()
+console.log(report.text)
+process.exit(report.ok ? 0 : 1)

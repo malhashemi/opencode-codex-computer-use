@@ -25,16 +25,31 @@ Nothing in Codex has to be configured by hand. You only need a working Computer 
 
 The ChatGPT app does not need to be open while you use OpenCode.
 
-Check your setup from this repository:
+**Windows and Linux (experimental):** Codex Computer Use also runs on Windows, and its runtime has a Linux target. The
+plugin itself is platform-neutral (it only talks to `codex app-server`), but it has only been tested on macOS. On
+other platforms, `codex` is found through `PATH` or the `codexPath` option, and OCR is not available yet.
 
-```sh
-bun install
-bun scripts/smoke.ts
+### Check your setup
+
+In OpenCode, run the **`/computer-use-doctor`** command. It checks, read-only, each requirement above: the platform,
+the `codex` executable, the Computer Use app and runtime, native app access and screenshots, OCR (when enabled) and
+connected browsers, and says how to fix whatever is missing. The report is added to the session without starting a
+model turn.
+
+From this repository, `bun scripts/smoke.ts` runs the same checks in a terminal (`--ocr` also tests OCR).
+
 ```
+## Codex Computer Use doctor: ready
 
-It reads Finder's UI, takes one screenshot and lists the connected browsers (all read-only), then prints `OK` or
-what is missing. You can also run
-`/Applications/ChatGPT.app/Contents/Resources/codex mcp list` and look for an enabled `cua_repl` server.
+- ✅ **Platform**: macOS 26.6.2 (arm64)
+- ✅ **codex executable**: /Applications/ChatGPT.app/Contents/Resources/codex (codex-cli 0.155.0-alpha.16)
+- ✅ **Computer Use app**: ~/.codex/computer-use/Codex Computer Use.app (26.916.1001103)
+- ✅ **Computer Use runtime**: Codex app-server running with `cua_repl`
+- ✅ **Native apps**: Engine reachable, 17 apps listed
+- ✅ **Screenshots**: Finder screenshot captured (image/jpeg, 132 KB)
+- ✅ **OCR**: 61 text lines recognized in 894 ms
+- ✅ **Browser tabs**: Connected: Chrome (extension)
+```
 
 ## Install in OpenCode
 
@@ -59,7 +74,11 @@ With options:
       "package": "/absolute/path/to/opencode-codex-computer-use",
       "options": {
         "approvals": "codex",
+        "surfaces": ["apps", "browser"],
+        "screenshots": "image",
+        "maxOutputKB": 128,
         "idleShutdownMinutes": 0,
+        "debug": false,
       },
     },
   ],
@@ -69,9 +88,13 @@ With options:
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `approvals` | `"codex"` | How "Allow Computer Use to use *App*?" prompts are answered. `"codex"` follows the `approval_policy` in your `~/.codex/config.toml` (with `"never"`, Codex answers them itself; any prompt Codex still forwards is declined). `"accept-session"` accepts each prompt for the current session only. `"decline"` declines them all. Apps blocked by the engine or your organization stay blocked in every mode. |
+| `surfaces` | `["apps", "browser"]` | What the agent may operate: native apps, browser tabs, or both. Turning one off removes it from the tool description and makes its `cua` functions throw. This scopes the model; it is not a security boundary. |
+| `screenshots` | `"image"` | How screenshots reach the model. `"image"`: as images. `"ocr"`: as text recognized on-device (macOS Vision), one line per text block with its `[x,y]` position, which is also a valid click coordinate; for models without vision, or to keep pixels off your model provider. `"both"`: image plus text. `"off"`: replaced by a placeholder, so the model relies on the accessibility tree. |
+| `maxOutputKB` | `128` | Maximum text one call returns. Longer output is cut, with a note telling the model to narrow its query. `0` disables the limit. Images are not counted. |
 | `idleShutdownMinutes` | `0` (never) | Stop the background Codex process after this many minutes without Computer Use calls. The default keeps it running until OpenCode stops, so work can wait indefinitely for you (for example, a login in a tab the agent handed over). |
 | `callTimeoutSeconds` | `300` | Maximum time for one `computer_use` call. |
-| `codexPath` | auto | Path to `codex`. Otherwise `$OPENCODE_CODEX_COMPUTER_USE_CODEX_PATH`, then the ChatGPT app, then the Codex app, then `PATH`. |
+| `codexPath` | auto | Path to `codex`. Otherwise `$OPENCODE_CODEX_COMPUTER_USE_CODEX_PATH`, then (on macOS) the ChatGPT app, then the Codex app, then `PATH`. |
+| `debug` | `false` | `true` (or a file path) writes every message exchanged with Codex to `~/.local/share/opencode/log/codex-computer-use.jsonl`, with screenshots replaced by their size. The log contains accessibility trees and page text, so it can hold sensitive data. |
 
 ### Permissions
 
@@ -92,6 +115,7 @@ call, or to turn it off, add a rule:
 | --- | --- |
 | `computer_use` | Runs JavaScript in Codex's Computer Use runtime, where a `cua` object is preloaded, and returns text output, accessibility trees and screenshots. Variables persist between calls in the same OpenCode session. |
 | `computer_use_reset` | Clears that runtime for the current session. |
+| `/computer-use-doctor` (command) | Checks the setup; see [Check your setup](#check-your-setup). |
 
 The same runtime covers both surfaces, as it does in Codex:
 
@@ -143,11 +167,11 @@ inside ChatGPT; your ChatGPT settings govern that.
 | Symptom | Fix |
 | --- | --- |
 | `Could not find the codex executable` | Install the ChatGPT desktop app in `/Applications`, or set `codexPath`. |
-| `Codex has no cua_repl MCP server` | Turn on Computer Use in the ChatGPT/Codex app, then run `bun scripts/smoke.ts` again. |
+| `Codex has no cua_repl MCP server` | Turn on Computer Use in the ChatGPT/Codex app, then run `/computer-use-doctor` again. |
 | Permission errors from the engine | Grant Accessibility and Screen Recording to *Codex Computer Use*, then retry. |
 | `Declined "Allow Computer Use to use …"` | Approve the app once in ChatGPT/Codex, or set `approvals` to `"accept-session"`. |
-| No browsers listed / Chrome tab calls fail | Install and connect the ChatGPT for Chrome extension from the ChatGPT/Codex app, keep Chrome running, then run `bun scripts/smoke.ts`. |
-| Plugin logs | Lines prefixed `[codex-computer-use]` in `~/.local/share/opencode/log/opencode.log`. |
+| No browsers listed / Chrome tab calls fail | Install and connect the ChatGPT for Chrome extension from the ChatGPT/Codex app, keep Chrome running, then run `/computer-use-doctor`. |
+| Anything else | Run `/computer-use-doctor`. Plugin messages are prefixed `[codex-computer-use]` in `~/.local/share/opencode/log/opencode.log`; set `"debug": true` to log the full exchange with Codex. |
 
 ## Development
 

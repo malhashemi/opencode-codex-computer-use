@@ -12,7 +12,14 @@ afterEach(async () => {
   delete process.env.FAKE_CODEX_NO_CUA
 })
 
-function setup(input: { approvals?: ApprovalMode; idleShutdownMs?: number } = {}) {
+function setup(
+  input: {
+    approvals?: ApprovalMode
+    idleShutdownMs?: number
+    codePrefix?: string
+    onTraffic?: (direction: "send" | "receive", message: unknown) => void
+  } = {},
+) {
   const logFile = join(mkdtempSync(join(tmpdir(), "cua-bridge-")), "codex.log")
   process.env.FAKE_CODEX_LOG = logFile
   const logs: string[] = []
@@ -24,6 +31,8 @@ function setup(input: { approvals?: ApprovalMode; idleShutdownMs?: number } = {}
     cwd: "/tmp/project",
     version: "test",
     log: (message) => logs.push(message),
+    codePrefix: input.codePrefix,
+    onTraffic: input.onTraffic,
   })
   bridges.push(bridge)
   const received = (): any[] =>
@@ -54,6 +63,22 @@ describe("ComputerUseBridge", () => {
     expect(starts).toHaveLength(2)
     expect(starts[0].params).toEqual({ ephemeral: true, cwd: "/tmp/project" })
     expect(calls("mcpServer/tool/call")[0].params).toMatchObject({ server: "cua_repl", tool: "js" })
+  })
+
+  test("prepends the code prefix and reports traffic", async () => {
+    const traffic: string[] = []
+    const { bridge } = setup({
+      codePrefix: "/* guard */",
+      onTraffic: (direction, message) => traffic.push(`${direction}:${(message as { method?: string }).method ?? "result"}`),
+    })
+    expect(text(await bridge.run("ses_a", "1 + 1"))).toBe("ran on thread-1: /* guard */\n1 + 1")
+    expect(traffic).toContain("send:mcpServer/tool/call")
+    expect(traffic).toContain("receive:result")
+  })
+
+  test("lists the thread's MCP servers", async () => {
+    const { bridge } = setup()
+    expect(await bridge.serverNames("ses_a")).toEqual(["cua_repl"])
   })
 
   test("concurrent first calls in one session share a thread", async () => {
