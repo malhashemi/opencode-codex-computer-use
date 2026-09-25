@@ -60,6 +60,7 @@ export async function runDoctor(
       return report(checks, options)
     }
     add("Computer Use runtime", "ok", `Codex app-server running with \`${CUA_SERVER}\``)
+    add("App access", ...approvalCheck(await bridge.approvalPolicy().catch(() => undefined)))
 
     const probe = (code: string) => bridge.run(sessionKey, code)
 
@@ -128,11 +129,21 @@ function report(checks: Check[], options: Options): DoctorReport {
     "",
     ...checks.map((check) => `- ${ICONS[check.status]} **${check.name}**: ${check.detail}`),
     "",
-    `Options: approvals=${options.approvals}, surfaces=${options.surfaces.join("+")}, screenshots=${options.screenshots}, ` +
+    `Options: surfaces=${options.surfaces.join("+")}, screenshots=${options.screenshots}, ` +
       `maxOutputKB=${Math.round(options.maxOutputBytes / 1024) || "unlimited"}, ` +
       `idleShutdownMinutes=${options.idleShutdownMs / 60_000 || "never"}, debug=${options.debugLog ?? "off"}`,
   ]
   return { ok, checks, text: lines.join("\n") }
+}
+
+export function approvalCheck(policy: string | undefined): [Status, string] {
+  if (policy === "never") return ["ok", 'Codex approves app access itself (approval_policy = "never")']
+  const setting = policy ? `approval_policy = "${policy}"` : "approval_policy unknown"
+  return [
+    "warn",
+    `${setting}: apps you have not approved permanently in ChatGPT/Codex will be declined, because OpenCode cannot ` +
+      'show Computer Use\'s approval prompts yet. Approve apps once in ChatGPT/Codex, or set approval_policy = "never".',
+  ]
 }
 
 async function platformCheck(): Promise<[Status, string]> {

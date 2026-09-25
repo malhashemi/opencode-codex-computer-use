@@ -3,6 +3,7 @@ import { homedir } from "node:os"
 import { join } from "node:path"
 
 import { stripImages } from "../src/debug"
+import { approvalCheck } from "../src/doctor"
 import { describeTool } from "../src/index"
 import { DEFAULT_DEBUG_LOG, parseOptions } from "../src/options"
 import { surfaceGuard } from "../src/surfaces"
@@ -11,13 +12,13 @@ describe("parseOptions", () => {
   test("defaults", () => {
     expect(parseOptions({})).toEqual({
       codexPath: undefined,
-      approvals: "codex",
       idleShutdownMs: 0,
       callTimeoutMs: 300_000,
       maxOutputBytes: 128 * 1024,
       screenshots: "image",
       surfaces: ["apps", "browser"],
       debugLog: undefined,
+      warnings: [],
     })
   })
 
@@ -25,7 +26,6 @@ describe("parseOptions", () => {
     expect(
       parseOptions({
         codexPath: " /x/codex ",
-        approvals: "accept-session",
         idleShutdownMinutes: 30,
         callTimeoutSeconds: 60,
         maxOutputKB: 0,
@@ -35,23 +35,36 @@ describe("parseOptions", () => {
       }),
     ).toEqual({
       codexPath: "/x/codex",
-      approvals: "accept-session",
       idleShutdownMs: 1_800_000,
       callTimeoutMs: 60_000,
       maxOutputBytes: 0,
       screenshots: "ocr",
       surfaces: ["browser"],
       debugLog: join(homedir(), "cu.jsonl"),
+      warnings: [],
     })
     expect(parseOptions({ debug: true }).debugLog).toBe(DEFAULT_DEBUG_LOG)
     expect(parseOptions({ surfaces: "apps" }).surfaces).toEqual(["apps"])
   })
 
   test("rejects invalid values", () => {
-    expect(() => parseOptions({ approvals: "always" })).toThrow("invalid option approvals")
     expect(() => parseOptions({ screenshots: "video" })).toThrow("invalid option screenshots")
     expect(() => parseOptions({ surfaces: [] })).toThrow("invalid option surfaces")
     expect(() => parseOptions({ surfaces: ["apps", "files"] })).toThrow("invalid option surfaces")
+  })
+})
+
+test("the removed approvals option is ignored with a warning", () => {
+  const options = parseOptions({ approvals: "accept-session" })
+  expect(options.warnings[0]).toContain('"approvals" option was removed')
+  expect("approvals" in options).toBe(false)
+})
+
+describe("approvalCheck", () => {
+  test("only never is fully automatic", () => {
+    expect(approvalCheck("never")[0]).toBe("ok")
+    expect(approvalCheck("on-request")).toEqual(["warn", expect.stringContaining('approval_policy = "on-request"')])
+    expect(approvalCheck(undefined)[1]).toContain("approval_policy unknown")
   })
 })
 

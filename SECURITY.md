@@ -13,8 +13,9 @@ published with credit to you, unless you prefer otherwise.
 
 This plugin lets an AI agent operate the apps and browser tabs on your computer, so these areas matter most:
 
-- **App approvals.** App-access prompts from Computer Use follow your Codex `approval_policy` by default and are never
-  accepted permanently. A way to make the plugin accept access the configuration does not allow is a vulnerability.
+- **App approvals.** The plugin never approves app access itself: Codex's `approval_policy` and the approvals stored
+  in ChatGPT/Codex decide, and any prompt Codex forwards to the plugin is declined. A way to make the plugin approve
+  app access is a vulnerability.
 - **Surfaces.** The `surfaces` option narrows what a cooperative model uses; it is documented as not being a security
   boundary. A bypass of OpenCode's `computer_use` permission rules would be in scope.
 - **The Codex process.** The plugin starts `codex app-server` from the ChatGPT or Codex app bundle, the `codexPath`

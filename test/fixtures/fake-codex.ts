@@ -30,6 +30,11 @@ createInterface({ input: process.stdin }).on("line", async (line) => {
       return
     case "thread/start":
       return send({ id, result: { thread: { id: `thread-${++threads}`, ephemeral: params.ephemeral, path: null } } })
+    case "config/read": {
+      const policy = process.env.FAKE_CODEX_POLICY
+      const value = policy === "granular" ? { granular: {} } : policy
+      return send({ id, result: { config: { approval_policy: value ?? null }, origins: {} } })
+    }
     case "thread/unsubscribe":
       return send({ id, result: { status: "unsubscribed" } })
     case "mcpServerStatus/list":
@@ -81,6 +86,7 @@ async function toolCall(id: number, params: any) {
         serverName: "cua_repl",
         mode: "form",
         message: 'Allow Computer Use to use "Calculator"?',
+        _meta: { tool_params_display: [{ name: "app", display_name: "App", value: "Calculator" }] },
       },
     })
     const result = await answer
