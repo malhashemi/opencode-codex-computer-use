@@ -54,6 +54,10 @@ The protocol the bridge speaks is defined in the open-source
    and say in the pull request what you ran and on which OS.
 4. Open the pull request with a [Conventional Commit](https://www.conventionalcommits.org/) title.
 
+`main` only changes through pull requests, and CI (format, lint, types and tests on macOS and Linux) must pass before
+anything merges. CI on a pull request from an outside contributor starts once a maintainer approves the run. A maintainer reviews
+and merges outside contributions; maintainers merge their own pull requests once CI passes.
+
 ### Commit and pull request titles
 
 Titles drive the changelog and version numbers, so they follow Conventional Commits:
@@ -86,7 +90,9 @@ Add `!` after the type (`feat!:`) for a breaking change, and describe the migrat
 Releases are automated with [release-please](https://github.com/googleapis/release-please):
 
 1. Merge pull requests with Conventional Commit titles.
-2. release-please keeps a release pull request open with the next version and the changelog entry.
+2. release-please keeps a release pull request open with the next version and the changelog entry. GitHub does not
+   run CI for pull requests opened by GitHub Actions, so the release workflow starts CI on that branch itself; its
+   checks appear on the release pull request like any other.
 3. Merging the release pull request tags the release, and the release workflow runs `bun run check` on the tag and
    publishes to npm.
 
