@@ -3,6 +3,8 @@ import { SURFACES, type Surface } from "./options"
 const BROWSER_METHODS = ["getBrowser", "createBrowserTab", "getTab", "listBrowsers", "listTabs"]
 const APP_METHODS = ["getApp", "listApps"]
 
+const message = (surface: string) => `${surface} are turned off by the opencode-codex-computer-use "surfaces" option.`
+
 /**
  * JavaScript run before the model's code when a surface is turned off. It replaces the disabled half of `cua` with
  * functions that throw a clear error and filters `cua.getState()`. It runs once per runtime (a reset or restart
@@ -15,8 +17,6 @@ export function surfaceGuard(enabled: readonly Surface[]): string | undefined {
   const noBrowser = disabled.includes("browser")
   const noApps = disabled.includes("apps")
   const methods = [...(noBrowser ? BROWSER_METHODS : []), ...(noApps ? APP_METHODS : [])]
-  const message = (surface: string) =>
-    `${surface} are turned off by the opencode-codex-computer-use "surfaces" option.`
   return [
     "if (!globalThis.__opencodeCuSurfaces) {",
     "globalThis.__opencodeCuSurfaces = true;",

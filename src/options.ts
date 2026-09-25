@@ -1,6 +1,8 @@
-import type { PluginOptions } from "@opencode/plugin"
 import { homedir } from "node:os"
 import { join } from "node:path"
+
+import type { PluginOptions } from "@opencode/plugin"
+
 import { APPROVAL_MODES, type ApprovalMode } from "./bridge"
 
 export const SCREENSHOT_MODES = ["image", "ocr", "both", "off"] as const

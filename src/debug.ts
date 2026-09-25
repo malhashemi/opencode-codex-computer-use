@@ -11,7 +11,10 @@ export function trafficLogger(path: string, log: (message: string) => void) {
   return (direction: "send" | "receive", message: unknown) => {
     if (failed) return
     try {
-      appendFileSync(path, JSON.stringify({ time: new Date().toISOString(), direction, message: stripImages(message) }) + "\n")
+      appendFileSync(
+        path,
+        JSON.stringify({ time: new Date().toISOString(), direction, message: stripImages(message) }) + "\n",
+      )
     } catch (error) {
       failed = true
       log(`debug log disabled, could not write ${path}: ${error instanceof Error ? error.message : String(error)}`)

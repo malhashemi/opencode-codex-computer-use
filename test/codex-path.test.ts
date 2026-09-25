@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { join } from "node:path"
+
 import { CODEX_PATH_ENV, resolveCodexPath } from "../src/codex-path"
 
 const FAKE_CODEX = join(import.meta.dir, "fixtures", "fake-codex")

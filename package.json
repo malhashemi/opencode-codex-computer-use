@@ -1,33 +1,60 @@
 {
   "name": "opencode-codex-computer-use",
-  "version": "0.1.0",
-  "description": "OpenCode plugin that drives the Codex Computer Use engine already installed with ChatGPT/Codex on macOS",
-  "type": "module",
+  "version": "0.0.0",
+  "description": "Let OpenCode operate your desktop apps and Chrome tabs with the Codex Computer Use engine already on your machine",
+  "keywords": [
+    "accessibility",
+    "automation",
+    "browser-use",
+    "codex",
+    "computer-use",
+    "macos",
+    "opencode",
+    "opencode-plugin"
+  ],
+  "homepage": "https://github.com/malhashemi/opencode-codex-computer-use#readme",
+  "bugs": "https://github.com/malhashemi/opencode-codex-computer-use/issues",
   "license": "MIT",
-  "exports": {
-    ".": "./src/index.ts"
+  "author": "M. Adel Alhashemi (https://github.com/malhashemi)",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/malhashemi/opencode-codex-computer-use.git"
   },
   "files": [
     "index.ts",
     "src",
-    "README.md"
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
   ],
-  "keywords": [
-    "opencode",
-    "opencode-plugin",
-    "codex",
-    "computer-use",
-    "macos"
-  ],
+  "type": "module",
+  "exports": {
+    ".": "./index.ts"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "scripts": {
+    "check": "bun run format:check && bun run lint && bun run typecheck && bun test",
+    "format": "oxfmt",
+    "format:check": "oxfmt --check",
+    "lint": "oxlint --deny-warnings",
+    "lint:fix": "oxlint --fix",
     "typecheck": "tsc --noEmit",
-    "test": "bun test"
+    "test": "bun test",
+    "doctor": "bun scripts/smoke.ts"
   },
   "dependencies": {
     "@opencode/plugin": "^2.0.16"
   },
   "devDependencies": {
     "@types/bun": "latest",
-    "typescript": "^5"
+    "oxfmt": "0.70.0",
+    "oxlint": "1.85.0",
+    "typescript": "^5.9.0"
+  },
+  "engines": {
+    "opencode": ">=2.0.16"
   }
 }

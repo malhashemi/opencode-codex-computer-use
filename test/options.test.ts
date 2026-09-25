@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { homedir } from "node:os"
 import { join } from "node:path"
+
 import { stripImages } from "../src/debug"
 import { describeTool } from "../src/index"
 import { DEFAULT_DEBUG_LOG, parseOptions } from "../src/options"
@@ -78,7 +79,9 @@ describe("surfaceGuard", () => {
     }
     const run = new Function("cua", "nodeRepl", "globalThis", `return (async () => { ${surfaceGuard(["apps"])} })()`)
     await run(cua, { write: (text: string) => written.push(text) }, {})
-    await expect(cua.getBrowser()).rejects.toThrow('Browser tabs are turned off by the opencode-codex-computer-use "surfaces" option.')
+    await expect(cua.getBrowser()).rejects.toThrow(
+      'Browser tabs are turned off by the opencode-codex-computer-use "surfaces" option.',
+    )
     expect(await cua.getApp()).toBe("app")
     expect(await cua.getState({ emit: false })).toEqual({ apps: ["Notes"], browsers: [] })
   })
@@ -96,8 +99,22 @@ describe("describeTool", () => {
 
 describe("stripImages", () => {
   test("replaces image data in nested messages", () => {
-    expect(stripImages({ result: { content: [{ type: "image", data: "abcd" }, { type: "text", text: "t" }] } })).toEqual({
-      result: { content: [{ type: "image", data: "<4 base64 chars>" }, { type: "text", text: "t" }] },
+    expect(
+      stripImages({
+        result: {
+          content: [
+            { type: "image", data: "abcd" },
+            { type: "text", text: "t" },
+          ],
+        },
+      }),
+    ).toEqual({
+      result: {
+        content: [
+          { type: "image", data: "<4 base64 chars>" },
+          { type: "text", text: "t" },
+        ],
+      },
     })
   })
 })

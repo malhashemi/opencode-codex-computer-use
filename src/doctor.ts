@@ -2,6 +2,7 @@ import { execFile } from "node:child_process"
 import { existsSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
+
 import { CUA_SERVER, type ComputerUseBridge, type McpContentBlock } from "./bridge"
 import { imageMime, textOf } from "./content"
 import { recognizeText } from "./ocr"
@@ -24,7 +25,11 @@ export interface DoctorReport {
 }
 
 /** Read-only checks of everything the plugin needs. Uses its own throwaway Codex thread. */
-export async function runDoctor(bridge: ComputerUseBridge, options: Options, sessionKey: string): Promise<DoctorReport> {
+export async function runDoctor(
+  bridge: ComputerUseBridge,
+  options: Options,
+  sessionKey: string,
+): Promise<DoctorReport> {
   const checks: Check[] = []
   const add = (name: string, status: Status, detail: string) => checks.push({ name, status, detail })
 
@@ -32,7 +37,11 @@ export async function runDoctor(bridge: ComputerUseBridge, options: Options, ses
 
   const codexPath = bridge.codexPath
   if (!codexPath) {
-    add("codex executable", "fail", "Not found. Install the ChatGPT (or Codex) desktop app, or set the `codexPath` option.")
+    add(
+      "codex executable",
+      "fail",
+      "Not found. Install the ChatGPT (or Codex) desktop app, or set the `codexPath` option.",
+    )
     return report(checks, options)
   }
   const version = await run(codexPath, ["--version"]).catch(() => "unknown version")
@@ -66,7 +75,10 @@ export async function runDoctor(bridge: ComputerUseBridge, options: Options, ses
       if (process.platform === "darwin" && count) {
         const shot = await probe(
           'const __doctorFinder = await cua.getApp("com.apple.finder"); await __doctorFinder.getScreenshot({ emit: true }); nodeRepl.write("SHOT");',
-        ).catch((error: unknown) => ({ content: [{ type: "text", text: String(error) }] as McpContentBlock[], isError: true }))
+        ).catch((error: unknown) => ({
+          content: [{ type: "text", text: String(error) }] as McpContentBlock[],
+          isError: true,
+        }))
         const image = shot.content.find((block) => block.type === "image" && typeof block.data === "string")
         add(
           "Screenshots",
@@ -88,12 +100,12 @@ export async function runDoctor(bridge: ComputerUseBridge, options: Options, ses
         'nodeRepl.write("BROWSERS=" + JSON.stringify((await cua.listBrowsers({ emit: false })).map(b => `${b.name ?? b.id} (${b.type})`)));',
       )
       const match = textOf(browsers.content).match(/BROWSERS=(.*)/)
-      const names: string[] = match ? JSON.parse(match[1]!) : []
+      const connected: string[] = match ? JSON.parse(match[1]!) : []
       add(
         "Browser tabs",
-        names.length ? "ok" : "warn",
-        names.length
-          ? `Connected: ${names.join(", ")}`
+        connected.length ? "ok" : "warn",
+        connected.length
+          ? `Connected: ${connected.join(", ")}`
           : match
             ? "No browser connected. Install and connect the ChatGPT for Chrome extension from the ChatGPT/Codex app."
             : firstLine(browsers.content, "Could not list browsers"),
@@ -128,11 +140,17 @@ async function platformCheck(): Promise<[Status, string]> {
     const version = (await run("/usr/bin/sw_vers", ["-productVersion"]).catch(() => "")).trim()
     const [major = 0, minor = 0] = version.split(".").map(Number)
     const supported = major > 14 || (major === 14 && minor >= 4)
-    if (process.arch !== "arm64") return ["fail", `macOS ${version} on ${process.arch}: Computer Use requires Apple Silicon`]
-    return supported ? ["ok", `macOS ${version} (arm64)`] : ["fail", `macOS ${version}: Computer Use requires 14.4 or later`]
+    if (process.arch !== "arm64")
+      return ["fail", `macOS ${version} on ${process.arch}: Computer Use requires Apple Silicon`]
+    return supported
+      ? ["ok", `macOS ${version} (arm64)`]
+      : ["fail", `macOS ${version}: Computer Use requires 14.4 or later`]
   }
   if (process.platform === "win32" || process.platform === "linux") {
-    return ["warn", `${process.platform} (${process.arch}): supported by Codex Computer Use, experimental in this plugin`]
+    return [
+      "warn",
+      `${process.platform} (${process.arch}): supported by Codex Computer Use, experimental in this plugin`,
+    ]
   }
   return ["fail", `${process.platform} is not supported by Codex Computer Use`]
 }
@@ -141,7 +159,12 @@ async function computerUseAppCheck(): Promise<[Status, string]> {
   const codexHome = process.env.CODEX_HOME || join(homedir(), ".codex")
   const app = join(codexHome, "computer-use", "Codex Computer Use.app")
   if (!existsSync(app)) return ["fail", `Not installed at ${app}. Turn on Computer Use in the ChatGPT/Codex app.`]
-  const version = await run("/usr/bin/plutil", ["-extract", "CFBundleShortVersionString", "raw", join(app, "Contents", "Info.plist")])
+  const version = await run("/usr/bin/plutil", [
+    "-extract",
+    "CFBundleShortVersionString",
+    "raw",
+    join(app, "Contents", "Info.plist"),
+  ])
     .then((out) => out.trim())
     .catch(() => "unknown version")
   return ["ok", `${app} (${version})`]

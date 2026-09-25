@@ -67,9 +67,7 @@ export async function recognizeText(image: Uint8Array, timeoutMs = 30_000): Prom
 /** Reading order: top to bottom, then left to right within roughly the same row. */
 export function formatOcr(result: OcrResult, index: number): string {
   const rowHeight = Math.max(4, Math.round(result.height / 150))
-  const lines = [...result.lines].sort(
-    (a, b) => Math.round(a.y / rowHeight) - Math.round(b.y / rowHeight) || a.x - b.x,
-  )
+  const lines = result.lines.toSorted((a, b) => Math.round(a.y / rowHeight) - Math.round(b.y / rowHeight) || a.x - b.x)
   const header =
     `Screenshot ${index} as text (on-device OCR, ${result.width}x${result.height} px; ` +
     "[x,y] is the center of each line in screenshot pixels):"

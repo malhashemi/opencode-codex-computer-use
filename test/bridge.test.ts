@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { mkdtempSync, readFileSync, existsSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+
 import { ComputerUseBridge, SetupError, type ApprovalMode } from "../src/bridge"
 
 const FAKE_CODEX = join(import.meta.dir, "fixtures", "fake-codex")
@@ -69,7 +70,8 @@ describe("ComputerUseBridge", () => {
     const traffic: string[] = []
     const { bridge } = setup({
       codePrefix: "/* guard */",
-      onTraffic: (direction, message) => traffic.push(`${direction}:${(message as { method?: string }).method ?? "result"}`),
+      onTraffic: (direction, message) =>
+        traffic.push(`${direction}:${(message as { method?: string }).method ?? "result"}`),
     })
     expect(text(await bridge.run("ses_a", "1 + 1"))).toBe("ran on thread-1: /* guard */\n1 + 1")
     expect(traffic).toContain("send:mcpServer/tool/call")
@@ -212,7 +214,7 @@ describe("ComputerUseBridge", () => {
   test("explains a missing cua_repl server as a setup problem", async () => {
     process.env.FAKE_CODEX_NO_CUA = "1"
     const { bridge } = setup()
-    const error = await bridge.run("ses_a", "x").catch((error) => error)
+    const error = (await bridge.run("ses_a", "x").catch((caught: unknown) => caught)) as Error
     expect(error).toBeInstanceOf(SetupError)
     expect(error.message).toContain("no `cua_repl` MCP server")
   })

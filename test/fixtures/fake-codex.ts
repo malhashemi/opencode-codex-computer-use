@@ -54,9 +54,18 @@ async function toolCall(id: number, params: any) {
   if (code.includes("BROWSER")) {
     const meta = params._meta?.["x-codex-turn-metadata"]
     if (!meta?.session_id || !meta?.turn_id) {
-      return send({ id, result: { isError: true, content: [{ type: "text", text: "Missing required Codex turn metadata: session_id, turn_id" }] } })
+      return send({
+        id,
+        result: {
+          isError: true,
+          content: [{ type: "text", text: "Missing required Codex turn metadata: session_id, turn_id" }],
+        },
+      })
     }
-    return send({ id, result: { content: [{ type: "text", text: 'BROWSERS=[{"id":"1","name":"Chrome","type":"extension"}]' }] } })
+    return send({
+      id,
+      result: { content: [{ type: "text", text: 'BROWSERS=[{"id":"1","name":"Chrome","type":"extension"}]' }] },
+    })
   }
   if (code.includes("THROW")) {
     return send({ id, result: { isError: true, content: [{ type: "text", text: "ReferenceError: boom" }] } })
@@ -67,7 +76,12 @@ async function toolCall(id: number, params: any) {
     send({
       id: requestID,
       method: "mcpServer/elicitation/request",
-      params: { threadId: params.threadId, serverName: "cua_repl", mode: "form", message: 'Allow Computer Use to use "Calculator"?' },
+      params: {
+        threadId: params.threadId,
+        serverName: "cua_repl",
+        mode: "form",
+        message: 'Allow Computer Use to use "Calculator"?',
+      },
     })
     const result = await answer
     return send({ id, result: { content: [{ type: "text", text: `elicitation:${result.action}` }] } })

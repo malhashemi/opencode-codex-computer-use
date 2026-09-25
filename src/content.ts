@@ -42,20 +42,16 @@ export async function toToolContent(
   const mode = options.screenshots ?? "image"
   const ocr = options.ocr ?? recognizeText
   let images = 0
-  const content: ToolContent[] = []
-  for (const block of blocks) {
-    if (block.type === "text" && typeof block.text === "string") {
-      content.push({ type: "text", text: block.text })
-      continue
-    }
+  const pending = blocks.map(async (block): Promise<ToolContent[]> => {
+    if (block.type === "text" && typeof block.text === "string") return [{ type: "text", text: block.text }]
     if (block.type !== "image" || typeof block.data !== "string") {
-      content.push({ type: "text", text: JSON.stringify(block) })
-      continue
+      return [{ type: "text", text: JSON.stringify(block) }]
     }
     const index = ++images
     const mime = imageMime(block.data, block.mimeType)
+    const items: ToolContent[] = []
     if (mode === "image" || mode === "both") {
-      content.push({
+      items.push({
         type: "file",
         uri: `data:${mime};base64,${block.data}`,
         mime,
@@ -63,19 +59,22 @@ export async function toToolContent(
       })
     }
     if (mode === "ocr" || mode === "both") {
-      const text = await ocr(Buffer.from(block.data, "base64")).then(
-        (result) => formatOcr(result, index),
-        (error: unknown) => `Screenshot ${index}: text recognition failed (${error instanceof Error ? error.message : String(error)}).`,
-      )
-      content.push({ type: "text", text })
+      try {
+        items.push({ type: "text", text: formatOcr(await ocr(Buffer.from(block.data, "base64")), index) })
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error)
+        items.push({ type: "text", text: `Screenshot ${index}: text recognition failed (${reason}).` })
+      }
     }
     if (mode === "off") {
-      content.push({
+      items.push({
         type: "text",
         text: `[Screenshot ${index} omitted: screenshots are turned off. Use the accessibility tree instead.]`,
       })
     }
-  }
+    return items
+  })
+  const content = (await Promise.all(pending)).flat()
   if (content.length === 0) content.push({ type: "text", text: "(no output)" })
   return [
     ...notes.map((note): ToolContent => ({ type: "text", text: `Note: ${note}` })),

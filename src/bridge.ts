@@ -95,7 +95,7 @@ export class ComputerUseBridge {
       if (this.restartedSessions.delete(sessionID)) {
         notes.push(
           "The Computer Use runtime was restarted since the previous call, so JavaScript variables from earlier calls " +
-            "(such as `app` or `tab`) no longer exist. Bind them again, for example `let app = await cua.getApp(\"Notes\")`.",
+            '(such as `app` or `tab`) no longer exist. Bind them again, for example `let app = await cua.getApp("Notes")`.',
         )
       }
 
@@ -297,23 +297,20 @@ export class ComputerUseBridge {
 
     const params: Record<string, unknown> = { ephemeral: true, cwd: this.options.cwd }
     if (this.options.approvals !== "codex") params.approvalPolicy = "on-request"
-    const threadID = client
-      .request("thread/start", params, { timeoutMs: 60_000 })
-      .then((response: any) => {
-        const id = response?.thread?.id
-        if (typeof id !== "string") throw new Error("thread/start returned no thread id")
-        return id
-      })
+    const threadID = client.request("thread/start", params, { timeoutMs: 60_000 }).then((response: any) => {
+      const id = response?.thread?.id
+      if (typeof id !== "string") throw new Error("thread/start returned no thread id")
+      return id
+    })
     const state: SessionState = { generation: this.generation, threadID, dirty: false }
     this.sessions.set(sessionID, state)
-    threadID.then(
-      (id) => {
-        state.resolvedThreadID = id
-      },
-      () => {
+    void (async () => {
+      try {
+        state.resolvedThreadID = await threadID
+      } catch {
         if (this.sessions.get(sessionID) === state) this.sessions.delete(sessionID)
-      },
-    )
+      }
+    })()
     return threadID
   }
 
@@ -354,14 +351,23 @@ export class ComputerUseBridge {
     const base = error instanceof Error ? error : new Error(String(error))
     if (base.name === "AbortError") return base
     if (base instanceof AppServerError && !client.closed) {
-      const available = await client
-        .request("mcpServerStatus/list", { threadId: threadID, detail: "toolsAndAuthOnly" }, { timeoutMs: 15_000 })
-        .then((response: any) =>
-          Array.isArray(response?.data) ? response.data.some((server: any) => server?.name === CUA_SERVER) : undefined,
+      let available: boolean | undefined
+      try {
+        const response = await client.request(
+          "mcpServerStatus/list",
+          { threadId: threadID, detail: "toolsAndAuthOnly" },
+          { timeoutMs: 15_000 },
         )
-        .catch(() => undefined)
+        if (Array.isArray(response?.data)) {
+          available = response.data.some((server: { name?: unknown }) => server?.name === CUA_SERVER)
+        }
+      } catch {
+        available = undefined
+      }
       if (available === false) {
-        return new SetupError(`Codex has no \`${CUA_SERVER}\` MCP server, so Computer Use is not enabled. ${SETUP_HELP}`)
+        return new SetupError(
+          `Codex has no \`${CUA_SERVER}\` MCP server, so Computer Use is not enabled. ${SETUP_HELP}`,
+        )
       }
     }
     if (notes.length === 0) return base

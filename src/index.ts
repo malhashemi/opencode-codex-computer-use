@@ -1,4 +1,5 @@
 import { Plugin } from "@opencode/plugin"
+
 import { ComputerUseBridge } from "./bridge"
 import { textOf, toToolContent } from "./content"
 import { trafficLogger } from "./debug"
@@ -14,6 +15,8 @@ const LOG_PREFIX = "[codex-computer-use]"
 export const PERMISSION_ACTION = "computer_use"
 export const DOCTOR_COMMAND = "computer-use-doctor"
 
+const log = (message: string) => console.error(`${LOG_PREFIX} ${message}`)
+
 export function describeTool(options: Options): string {
   const apps = options.surfaces.includes("apps")
   const browser = options.surfaces.includes("browser")
@@ -28,7 +31,7 @@ export function describeTool(options: Options): string {
       `- Web pages: ${apps ? "prefer browser tabs over driving the Chrome app. " : ""}Open one with \`let browser = await cua.getBrowser(); let tab = await cua.createBrowserTab(browser.browserId, "https://example.com")\`, or bind an open tab with \`cua.getTab({ url })\`. Tabs add \`goto\`, \`back\`, \`reload\` and \`close\`. Chrome tabs need the ChatGPT for Chrome extension.`,
     !apps && "- Native apps are turned off in this setup; only browser tabs are available.",
     !browser && "- Browser tabs are turned off in this setup; drive browsers as ordinary apps if needed.",
-    "- Act on elements by index where possible (e.g. `await target.click(12)`, `await target.setValue(5, \"text\")`), then type or press keys with `typeText(...)` / `pressKey(\"super+c\")` (tabs take an element index first: `tab.typeText(7, \"hi\")`). Keys go to the bound app or tab, so system-wide shortcuts such as Spotlight do not work.",
+    '- Act on elements by index where possible (e.g. `await target.click(12)`, `await target.setValue(5, "text")`), then type or press keys with `typeText(...)` / `pressKey("super+c")` (tabs take an element index first: `tab.typeText(7, "hi")`). Keys go to the bound app or tab, so system-wide shortcuts such as Spotlight do not work.',
     `- Re-read with \`await target.getAXState()\` (returns only what changed) or \`await target.getScreenshot({ emit: true })\` when the tree is not enough.${screenshotHint(options)}`,
     "- Print values with `nodeRepl.write(...)` (strings only; use JSON.stringify for objects).",
     `- The first call in a session also returns the engine's full API reference. Read it before acting.${options.maxOutputBytes ? ` Output above ${Math.round(options.maxOutputBytes / 1024)} KB per call is truncated, so read large trees with { emit: false } and print only what you need.` : ""}`,
@@ -57,7 +60,6 @@ const RESET_DESCRIPTION =
 export default Plugin.define({
   id: "codex-computer-use",
   async setup(ctx) {
-    const log = (message: string) => console.error(`${LOG_PREFIX} ${message}`)
     const options = parseOptions(ctx.options)
     const bridge = new ComputerUseBridge({
       ...options,

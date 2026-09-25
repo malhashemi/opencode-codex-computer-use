@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+
 import { imageMime, textOf, toToolContent } from "../src/content"
 import { formatOcr, type OcrResult } from "../src/ocr"
 
@@ -54,9 +55,13 @@ describe("toToolContent", () => {
 
   test("caps text output and explains how to narrow it; notes and images are kept", async () => {
     const big = "x".repeat(3000)
-    const content = await toToolContent([{ type: "text", text: big }, IMAGE, { type: "text", text: "tail" }], ["restarted"], {
-      maxOutputBytes: 1024,
-    })
+    const content = await toToolContent(
+      [{ type: "text", text: big }, IMAGE, { type: "text", text: "tail" }],
+      ["restarted"],
+      {
+        maxOutputBytes: 1024,
+      },
+    )
     expect(content[0]).toEqual({ type: "text", text: "Note: restarted" })
     expect((content[1] as { text: string }).text).toHaveLength(1024)
     expect(content[2]).toMatchObject({ type: "file" })
@@ -85,7 +90,13 @@ describe("toToolContent", () => {
   })
 
   test("textOf joins text blocks only", () => {
-    expect(textOf([{ type: "text", text: "a" }, { type: "image", data: "x" }, { type: "text", text: "b" }])).toBe("a\nb")
+    expect(
+      textOf([
+        { type: "text", text: "a" },
+        { type: "image", data: "x" },
+        { type: "text", text: "b" },
+      ]),
+    ).toBe("a\nb")
   })
 })
 
