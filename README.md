@@ -172,20 +172,25 @@ question, as they do inside Codex:
 - With `approval_policy = "never"` in `~/.codex/config.toml`, Codex approves app access itself.
 - Apps you approved permanently in ChatGPT or Codex are always allowed.
 - Any other app is declined, and the agent tells you which app needs permission. OpenCode's plugin API cannot show
-  these prompts as OpenCode permission questions yet; once it can, they will appear in OpenCode instead.
+  these prompts as OpenCode permission questions yet; once it can
+  ([anomalyco/opencode#46530](https://github.com/anomalyco/opencode/pull/46530)), they will appear in OpenCode instead.
 
 Apps blocked by the engine or your organization stay blocked. `/computer-use-doctor` shows which policy applies.
 
 ### Permissions
 
-Both tools use the OpenCode permission action `computer_use`. OpenCode allows it by default; to be asked before every
-call, or to turn it off, add a rule:
+Both tools use the OpenCode permission action `computer_use`, which OpenCode allows by default. To turn Computer Use
+off for a project or an agent, deny it; the tools then disappear from the model's tool list:
 
 ```jsonc
 {
-  "permissions": [{ "action": "computer_use", "resource": "*", "effect": "ask" }],
+  "permissions": [{ "action": "computer_use", "resource": "*", "effect": "deny" }],
 }
 ```
+
+An `ask` rule is meant to prompt before every call, but OpenCode 2.0.16 does not yet apply `ask` to tools from external
+plugins ([anomalyco/opencode#50652](https://github.com/anomalyco/opencode/issues/50652), fix in
+[#50657](https://github.com/anomalyco/opencode/pull/50657)); until that fix ships, `ask` behaves like `allow`.
 
 ## How it works
 
