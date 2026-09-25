@@ -55,7 +55,8 @@ The protocol the bridge speaks is defined in the open-source
 4. Open the pull request with a [Conventional Commit](https://www.conventionalcommits.org/) title.
 
 `main` only changes through pull requests, and CI (format, lint, types and tests on macOS and Linux) must pass before
-anything merges. CI on a pull request from an outside contributor starts once a maintainer approves the run. A maintainer reviews
+anything merges. CI on a pull request from someone
+who has not had a contribution merged yet starts once a maintainer approves the run. A maintainer reviews
 and merges outside contributions; maintainers merge their own pull requests once CI passes.
 
 ### Commit and pull request titles
