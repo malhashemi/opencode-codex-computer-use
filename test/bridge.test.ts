@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, existsSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { ComputerUseBridge, SetupError, type ApprovalMode } from "../src/bridge"
+import { ComputerUseBridge, SetupError } from "../src/bridge"
 
 const FAKE_CODEX = join(import.meta.dir, "fixtures", "fake-codex")
 const bridges: ComputerUseBridge[] = []
@@ -11,11 +11,11 @@ const bridges: ComputerUseBridge[] = []
 afterEach(async () => {
   await Promise.all(bridges.splice(0).map((bridge) => bridge.dispose()))
   delete process.env.FAKE_CODEX_NO_CUA
+  delete process.env.FAKE_CODEX_POLICY
 })
 
 function setup(
   input: {
-    approvals?: ApprovalMode
     idleShutdownMs?: number
     codePrefix?: string
     onTraffic?: (direction: "send" | "receive", message: unknown) => void
@@ -26,7 +26,6 @@ function setup(
   const logs: string[] = []
   const bridge = new ComputerUseBridge({
     codexPath: FAKE_CODEX,
-    approvals: input.approvals ?? "codex",
     idleShutdownMs: input.idleShutdownMs ?? 0,
     callTimeoutMs: 10_000,
     cwd: "/tmp/project",
@@ -110,30 +109,20 @@ describe("ComputerUseBridge", () => {
     expect(text(result)).toContain("ReferenceError")
   })
 
-  test("codex mode keeps the Codex approval policy and declines forwarded prompts with a note", async () => {
-    const { bridge, calls } = setup({ approvals: "codex" })
+  test("follows the Codex approval policy and declines forwarded prompts with an actionable note", async () => {
+    const { bridge, calls } = setup()
     const result = await bridge.run("ses_a", "ELICIT")
     expect(calls("thread/start")[0].params.approvalPolicy).toBeUndefined()
     expect(text(result)).toBe("elicitation:decline")
-    expect(result.notes[0]).toContain('Declined "Allow Computer Use to use "Calculator"?"')
+    expect(result.notes[0]).toContain('needs permission to use "Calculator"')
+    expect(result.notes[0]).toContain('approval_policy = "never"')
   })
 
-  test("accept-session mode asks Codex to forward prompts and accepts them for the session only", async () => {
-    const { bridge, calls, received } = setup({ approvals: "accept-session" })
-    const result = await bridge.run("ses_a", "ELICIT")
-    expect(calls("thread/start")[0].params.approvalPolicy).toBe("on-request")
-    expect(text(result)).toBe("elicitation:accept")
-    const answer = received().find((message) => message.id === 1000)
-    expect(answer.result).toEqual({ action: "accept", content: {}, _meta: { persist: "session" } })
-    expect(result.notes).toEqual([])
-  })
-
-  test("decline mode declines prompts", async () => {
-    const { bridge, calls } = setup({ approvals: "decline" })
-    const result = await bridge.run("ses_a", "ELICIT")
-    expect(calls("thread/start")[0].params.approvalPolicy).toBe("on-request")
-    expect(text(result)).toBe("elicitation:decline")
-    expect(result.notes[0]).toContain('`approvals` is "decline"')
+  test("reads the Codex approval policy", async () => {
+    process.env.FAKE_CODEX_POLICY = "never"
+    expect(await setup().bridge.approvalPolicy()).toBe("never")
+    process.env.FAKE_CODEX_POLICY = "granular"
+    expect(await setup().bridge.approvalPolicy()).toBe("granular")
   })
 
   test("sends turn_ended once per turn that used Computer Use", async () => {

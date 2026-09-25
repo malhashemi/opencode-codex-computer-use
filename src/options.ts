@@ -3,8 +3,6 @@ import { join } from "node:path"
 
 import type { PluginOptions } from "@opencode/plugin"
 
-import { APPROVAL_MODES, type ApprovalMode } from "./bridge"
-
 export const SCREENSHOT_MODES = ["image", "ocr", "both", "off"] as const
 export type ScreenshotMode = (typeof SCREENSHOT_MODES)[number]
 
@@ -13,7 +11,6 @@ export type Surface = (typeof SURFACES)[number]
 
 export interface Options {
   codexPath?: string
-  approvals: ApprovalMode
   idleShutdownMs: number
   callTimeoutMs: number
   /** Maximum text returned by one call, in bytes. 0 disables the limit. */
@@ -22,6 +19,8 @@ export interface Options {
   surfaces: readonly Surface[]
   /** JSONL file receiving the app-server traffic, or undefined when debugging is off. */
   debugLog?: string
+  /** Messages about options that were accepted but have no effect. */
+  warnings: readonly string[]
 }
 
 export const DEFAULT_DEBUG_LOG = join(
@@ -32,15 +31,21 @@ export const DEFAULT_DEBUG_LOG = join(
 )
 
 export function parseOptions(raw: PluginOptions): Options {
+  const warnings: string[] = []
+  if (raw.approvals !== undefined) {
+    warnings.push(
+      'The "approvals" option was removed in 0.1.1 and is ignored: app access follows your Codex approval_policy.',
+    )
+  }
   return {
     codexPath: typeof raw.codexPath === "string" && raw.codexPath.trim() ? raw.codexPath.trim() : undefined,
-    approvals: oneOf("approvals", raw.approvals, APPROVAL_MODES, "codex"),
     idleShutdownMs: nonNegative(raw.idleShutdownMinutes, 0) * 60_000,
     callTimeoutMs: positive(raw.callTimeoutSeconds, 300) * 1_000,
     maxOutputBytes: Math.round(nonNegative(raw.maxOutputKB, 128) * 1024),
     screenshots: oneOf("screenshots", raw.screenshots, SCREENSHOT_MODES, "image"),
     surfaces: surfaces(raw.surfaces),
     debugLog: debugLog(raw.debug),
+    warnings,
   }
 }
 

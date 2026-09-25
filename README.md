@@ -125,6 +125,7 @@ From a checkout, `bun run doctor` runs the same checks in a terminal (`bun scrip
 - ✅ **codex executable**: /Applications/ChatGPT.app/Contents/Resources/codex (codex-cli 0.155.0-alpha.16)
 - ✅ **Computer Use app**: ~/.codex/computer-use/Codex Computer Use.app (26.916.1001103)
 - ✅ **Computer Use runtime**: Codex app-server running with `cua_repl`
+- ✅ **App access**: Codex approves app access itself (approval_policy = "never")
 - ✅ **Native apps**: Engine reachable, 17 apps listed
 - ✅ **Screenshots**: Finder screenshot captured (image/jpeg, 132 KB)
 - ✅ **OCR**: 61 text lines recognized in 894 ms
@@ -141,7 +142,6 @@ Pass options with the object form of the plugin entry. Every option is optional;
     {
       "package": "opencode-codex-computer-use",
       "options": {
-        "approvals": "codex",
         "surfaces": ["apps", "browser"],
         "screenshots": "image",
         "maxOutputKB": 128,
@@ -154,27 +154,43 @@ Pass options with the object form of the plugin entry. Every option is optional;
 }
 ```
 
-| Option                | Default               | Meaning                                                                                                                                                                                                                                                                                                                                                                                                       |
-| --------------------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `approvals`           | `"codex"`             | How "Allow Computer Use to use _App_?" prompts are answered. `"codex"` follows the `approval_policy` in your `~/.codex/config.toml` (with `"never"`, Codex answers them itself; any prompt Codex still forwards is declined). `"accept-session"` accepts each prompt for the current session only. `"decline"` declines them all. Apps blocked by the engine or your organization stay blocked in every mode. |
-| `surfaces`            | `["apps", "browser"]` | What the agent may operate: native apps, browser tabs, or both. Turning one off removes it from the tool description and makes its `cua` functions throw. This scopes the model; it is not a security boundary.                                                                                                                                                                                               |
-| `screenshots`         | `"image"`             | How screenshots reach the model. `"image"`: as images. `"ocr"`: as text recognized on-device (macOS Vision), one line per text block with its `[x,y]` position, which is also a valid click coordinate; for models without vision, or to keep pixels off your model provider. `"both"`: image plus text. `"off"`: replaced by a placeholder, so the model relies on the accessibility tree.                   |
-| `maxOutputKB`         | `128`                 | Maximum text one call returns. Longer output is cut, with a note telling the model to narrow its query. `0` disables the limit. Images are not counted.                                                                                                                                                                                                                                                       |
-| `idleShutdownMinutes` | `0` (never)           | Stop the background Codex process after this many minutes without Computer Use calls. The default keeps it running until OpenCode stops, so work can wait indefinitely for you (for example, a login in a tab the agent handed over).                                                                                                                                                                         |
-| `callTimeoutSeconds`  | `300`                 | Maximum time for one `computer_use` call.                                                                                                                                                                                                                                                                                                                                                                     |
-| `codexPath`           | auto                  | Path to `codex`. Otherwise `$OPENCODE_CODEX_COMPUTER_USE_CODEX_PATH`, then (on macOS) the ChatGPT app, then the Codex app, then `PATH`.                                                                                                                                                                                                                                                                       |
-| `debug`               | `false`               | `true` (or a file path) writes every message exchanged with Codex to `~/.local/share/opencode/log/codex-computer-use.jsonl`, with screenshots replaced by their size. The log contains accessibility trees and page text, so it can hold sensitive data.                                                                                                                                                      |
+| Option                | Default               | Meaning                                                                                                                                                                                                                                                                                                                                                                                     |
+| --------------------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `surfaces`            | `["apps", "browser"]` | What the agent may operate: native apps, browser tabs, or both. Turning one off removes it from the tool description and makes its `cua` functions throw. This scopes the model; it is not a security boundary.                                                                                                                                                                             |
+| `screenshots`         | `"image"`             | How screenshots reach the model. `"image"`: as images. `"ocr"`: as text recognized on-device (macOS Vision), one line per text block with its `[x,y]` position, which is also a valid click coordinate; for models without vision, or to keep pixels off your model provider. `"both"`: image plus text. `"off"`: replaced by a placeholder, so the model relies on the accessibility tree. |
+| `maxOutputKB`         | `128`                 | Maximum text one call returns. Longer output is cut, with a note telling the model to narrow its query. `0` disables the limit. Images are not counted.                                                                                                                                                                                                                                     |
+| `idleShutdownMinutes` | `0` (never)           | Stop the background Codex process after this many minutes without Computer Use calls. The default keeps it running until OpenCode stops, so work can wait indefinitely for you (for example, a login in a tab the agent handed over).                                                                                                                                                       |
+| `callTimeoutSeconds`  | `300`                 | Maximum time for one `computer_use` call.                                                                                                                                                                                                                                                                                                                                                   |
+| `codexPath`           | auto                  | Path to `codex`. Otherwise `$OPENCODE_CODEX_COMPUTER_USE_CODEX_PATH`, then (on macOS) the ChatGPT app, then the Codex app, then `PATH`.                                                                                                                                                                                                                                                     |
+| `debug`               | `false`               | `true` (or a file path) writes every message exchanged with Codex to `~/.local/share/opencode/log/codex-computer-use.jsonl`, with screenshots replaced by their size. The log contains accessibility trees and page text, so it can hold sensitive data.                                                                                                                                    |
+
+### App access
+
+Computer Use asks before it touches an app ("Allow Computer Use to use Calculator?"). Your Codex settings answer that
+question, as they do inside Codex:
+
+- With `approval_policy = "never"` in `~/.codex/config.toml`, Codex approves app access itself.
+- Apps you approved permanently in ChatGPT or Codex are always allowed.
+- Any other app is declined, and the agent tells you which app needs permission. OpenCode's plugin API cannot show
+  these prompts as OpenCode permission questions yet; once it can
+  ([anomalyco/opencode#46530](https://github.com/anomalyco/opencode/pull/46530)), they will appear in OpenCode instead.
+
+Apps blocked by the engine or your organization stay blocked. `/computer-use-doctor` shows which policy applies.
 
 ### Permissions
 
-Both tools use the OpenCode permission action `computer_use`. OpenCode allows it by default; to be asked before every
-call, or to turn it off, add a rule:
+Both tools use the OpenCode permission action `computer_use`, which OpenCode allows by default. To turn Computer Use
+off for a project or an agent, deny it; the tools then disappear from the model's tool list:
 
 ```jsonc
 {
-  "permissions": [{ "action": "computer_use", "resource": "*", "effect": "ask" }],
+  "permissions": [{ "action": "computer_use", "resource": "*", "effect": "deny" }],
 }
 ```
+
+An `ask` rule is meant to prompt before every call, but OpenCode 2.0.16 does not yet apply `ask` to tools from external
+plugins ([anomalyco/opencode#50652](https://github.com/anomalyco/opencode/issues/50652), fix in
+[#50657](https://github.com/anomalyco/opencode/pull/50657)); until that fix ships, `ask` behaves like `allow`.
 
 ## How it works
 
@@ -213,7 +229,7 @@ Start with `/computer-use-doctor`; it names the missing piece.
 | `Could not find the codex executable`      | Install the ChatGPT desktop app in `/Applications`, or set `codexPath`.                                                                                     |
 | `Codex has no cua_repl MCP server`         | Turn on Computer Use in the ChatGPT/Codex app, then run `/computer-use-doctor` again.                                                                       |
 | Permission errors from the engine          | Grant Accessibility and Screen Recording to _Codex Computer Use_, then retry.                                                                               |
-| `Declined "Allow Computer Use to use …"`   | Approve the app once in ChatGPT/Codex, or set `approvals` to `"accept-session"`.                                                                            |
+| The agent says an app needs permission     | Approve the app permanently in ChatGPT/Codex, or set `approval_policy = "never"`; see [App access](#app-access).                                            |
 | No browsers listed / Chrome tab calls fail | Install and connect the ChatGPT for Chrome extension from the ChatGPT/Codex app, keep Chrome running, then run `/computer-use-doctor`.                      |
 | Anything else                              | Plugin messages are prefixed `[codex-computer-use]` in `~/.local/share/opencode/log/opencode.log`; set `"debug": true` to log the full exchange with Codex. |
 

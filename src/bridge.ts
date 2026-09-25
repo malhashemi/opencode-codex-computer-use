@@ -4,18 +4,8 @@ import { BUNDLED_CODEX_PATHS, CODEX_PATH_ENV, resolveCodexPath } from "./codex-p
 /** Codex's MCP server that hosts the Computer Use JavaScript runtime (`cua`). */
 export const CUA_SERVER = "cua_repl"
 
-/**
- * How app-access prompts from Computer Use ("Allow Computer Use to use X?") are answered.
- * - `codex`: follow the user's Codex `approval_policy`; prompts Codex forwards anyway are declined.
- * - `accept-session`: accept each prompt for the current thread only (never "always").
- * - `decline`: decline every prompt; only apps the engine already allows can be used.
- */
-export type ApprovalMode = "codex" | "accept-session" | "decline"
-export const APPROVAL_MODES: readonly ApprovalMode[] = ["codex", "accept-session", "decline"]
-
 export interface BridgeOptions {
   codexPath?: string
-  approvals: ApprovalMode
   idleShutdownMs: number
   callTimeoutMs: number
   cwd: string
@@ -206,6 +196,17 @@ export class ComputerUseBridge {
     })
   }
 
+  /** The effective Codex `approval_policy` (a granular policy is reported as "granular"), if Codex reports it. */
+  async approvalPolicy(): Promise<string | undefined> {
+    return this.busy(async () => {
+      const client = await this.ensureClient()
+      const response = await client.request("config/read", { cwd: this.options.cwd }, { timeoutMs: 15_000 })
+      const policy = response?.config?.approval_policy
+      if (typeof policy === "string") return policy
+      return policy && typeof policy === "object" ? "granular" : undefined
+    })
+  }
+
   get codexPath(): string | undefined {
     return resolveCodexPath(this.options.codexPath)
   }
@@ -295,8 +296,8 @@ export class ComputerUseBridge {
     const existing = this.sessions.get(sessionID)
     if (existing && existing.generation === this.generation) return existing.threadID
 
+    // No approvalPolicy: app access follows the user's Codex approval_policy.
     const params: Record<string, unknown> = { ephemeral: true, cwd: this.options.cwd }
-    if (this.options.approvals !== "codex") params.approvalPolicy = "on-request"
     const threadID = client.request("thread/start", params, { timeoutMs: 60_000 }).then((response: any) => {
       const id = response?.thread?.id
       if (typeof id !== "string") throw new Error("thread/start returned no thread id")
@@ -318,17 +319,10 @@ export class ComputerUseBridge {
     if (method !== "mcpServer/elicitation/request") {
       throw new Error(`${method} is not supported by opencode-codex-computer-use`)
     }
+    // OpenCode's plugin API cannot raise a permission question yet, so a prompt Codex forwards
+    // (because approval_policy is not "never") is declined, and the model is told how the user can allow the app.
     const message = typeof params?.message === "string" ? params.message : "Computer Use requested approval"
-    if (this.options.approvals === "accept-session") {
-      this.options.log(`accepted for this session: ${message}`)
-      return { action: "accept", content: {}, _meta: { persist: "session" } }
-    }
-    const reason =
-      this.options.approvals === "decline"
-        ? 'the plugin option `approvals` is "decline"'
-        : "Codex asked for a decision instead of applying its own approval_policy. Approve the app once in the " +
-          'ChatGPT/Codex app, or set the plugin option `approvals` to "accept-session"'
-    this.addApprovalNote(params?.threadId, `Declined "${message}" because ${reason}.`)
+    this.addApprovalNote(params?.threadId, declinedNote(message, appName(params)))
     this.options.log(`declined: ${message}`)
     return { action: "decline", content: null }
   }
@@ -375,6 +369,22 @@ export class ComputerUseBridge {
     wrapped.name = base.name
     return wrapped
   }
+}
+
+function appName(params: any): string | undefined {
+  const display = params?._meta?.tool_params_display
+  const entry = Array.isArray(display) ? display.find((item: { name?: string }) => item?.name === "app") : undefined
+  return typeof entry?.value === "string" ? entry.value : undefined
+}
+
+export function declinedNote(message: string, app?: string): string {
+  const target = app ? `"${app}"` : "this app"
+  return (
+    `Computer Use asked "${message}" and it could not be approved from OpenCode. Tell the user that Computer Use ` +
+    `needs permission to use ${target}. They can approve it permanently in the ChatGPT or Codex app (use the app ` +
+    'once through Computer Use there and choose to always allow it), or set approval_policy = "never" in ' +
+    "~/.codex/config.toml so Codex approves apps itself."
+  )
 }
 
 /**

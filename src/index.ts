@@ -61,6 +61,7 @@ export default Plugin.define({
   id: "codex-computer-use",
   async setup(ctx) {
     const options = parseOptions(ctx.options)
+    for (const warning of options.warnings) log(warning)
     const bridge = new ComputerUseBridge({
       ...options,
       cwd: ctx.location.directory,

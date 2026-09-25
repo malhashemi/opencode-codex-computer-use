@@ -33,15 +33,15 @@ project's `plugins`. After editing, run `opencode api post /api/location/reload`
 
 ### How the code fits together
 
-| File                | Role                                                                                                                  |
-| ------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| `src/index.ts`      | Plugin entry: options, the `computer_use` tools, the doctor command, turn and session events                          |
-| `src/bridge.ts`     | One `codex app-server` per plugin instance, one ephemeral Codex thread per OpenCode session, approvals, turn metadata |
-| `src/app-server.ts` | JSON-RPC client for `codex app-server --listen stdio://`                                                              |
-| `src/content.ts`    | Converts Codex results to OpenCode content: screenshots, OCR, output cap                                              |
-| `src/ocr.ts`        | On-device OCR with the macOS Vision framework                                                                         |
-| `src/surfaces.ts`   | Turns native apps or browser tabs off inside the runtime                                                              |
-| `src/doctor.ts`     | Setup checks shared by `/computer-use-doctor` and `scripts/smoke.ts`                                                  |
+| File                | Role                                                                                                                           |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `src/index.ts`      | Plugin entry: options, the `computer_use` tools, the doctor command, turn and session events                                   |
+| `src/bridge.ts`     | One `codex app-server` per plugin instance, one ephemeral Codex thread per OpenCode session, app-access prompts, turn metadata |
+| `src/app-server.ts` | JSON-RPC client for `codex app-server --listen stdio://`                                                                       |
+| `src/content.ts`    | Converts Codex results to OpenCode content: screenshots, OCR, output cap                                                       |
+| `src/ocr.ts`        | On-device OCR with the macOS Vision framework                                                                                  |
+| `src/surfaces.ts`   | Turns native apps or browser tabs off inside the runtime                                                                       |
+| `src/doctor.ts`     | Setup checks shared by `/computer-use-doctor` and `scripts/smoke.ts`                                                           |
 
 The protocol the bridge speaks is defined in the open-source
 [Codex app-server protocol](https://github.com/openai/codex/tree/main/codex-rs/app-server-protocol).
