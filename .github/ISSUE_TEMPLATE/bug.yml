@@ -1,0 +1,57 @@
+name: Bug report
+description: Something doesn't work as described
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for reporting! The `/computer-use-doctor` report usually shows what is missing, so please include it.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What did you ask the agent to do, what did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Doctor report
+      description: Run `/computer-use-doctor` in OpenCode (or `bun scripts/smoke.ts` in a checkout) and paste the result.
+      render: markdown
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Plugin version
+      placeholder: "0.1.0"
+    validations:
+      required: true
+  - type: input
+    id: opencode
+    attributes:
+      label: OpenCode version
+      description: Output of `opencode --version`
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options: [macOS (Apple Silicon), macOS (Intel), Windows, Linux, Other]
+    validations:
+      required: true
+  - type: input
+    id: app
+    attributes:
+      label: App or website involved
+      placeholder: Notes, Finder, Chrome on github.com...
+  - type: textarea
+    id: log
+    attributes:
+      label: Debug log (optional)
+      description: |
+        With `"debug": true` in the plugin options, the exchange with Codex is written to
+        `~/.local/share/opencode/log/codex-computer-use.jsonl`. It contains accessibility trees and page text,
+        so remove anything private first.
+      render: jsonl
