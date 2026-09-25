@@ -1,6 +1,6 @@
 {
   "name": "opencode-codex-computer-use",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Let OpenCode operate your desktop apps and Chrome tabs with the Codex Computer Use engine already on your machine",
   "keywords": [
     "accessibility",
