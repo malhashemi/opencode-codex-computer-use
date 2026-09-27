@@ -26,7 +26,7 @@ export function describeTool(options: Options): string {
   const lines = [
     `Operate ${targets} through the Codex Computer Use engine installed with the ChatGPT/Codex desktop app.`,
     options.ssh &&
-      `The ${targets} are on ${options.ssh} (reached over SSH), a different machine from the one your shell and file tools use, so local files are not visible there until copied.`,
+      `The ${targets} are on ${options.ssh} (reached over SSH), a different machine from the one your shell and file tools use, so local files are not visible there until copied (for example with \`scp <file> ${options.ssh}:\`).`,
     "",
     "Runs JavaScript in a persistent runtime (per OpenCode session) where a `cua` object is preloaded. Variables persist between calls.",
     apps &&

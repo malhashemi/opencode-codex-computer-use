@@ -236,6 +236,12 @@ describe("ComputerUseBridge", () => {
     expect(logs.some((line) => line.endsWith(`from ${FAKE_CODEX} on my-mac over SSH`))).toBe(true)
   })
 
+  test("a call names the remote host it cannot reach", async () => {
+    process.env.PATH = FAKE_SSH_DIR
+    const { bridge } = setup({ host: sshHost("my-mac") })
+    await expect(bridge.run("ses_a", "1 + 1")).rejects.toThrow(/^Could not reach my-mac over SSH: /)
+  })
+
   test("stops the app-server after the idle timeout", async () => {
     const { bridge, calls, logs } = setup({ idleShutdownMs: 200 })
     await bridge.run("ses_a", "x")

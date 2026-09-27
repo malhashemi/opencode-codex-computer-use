@@ -160,10 +160,16 @@ describe("sshHost through a stand-in ssh", () => {
     })
   })
 
+  test("names the machine it could not reach, with the reason", async () => {
+    // ssh starts, but the remote side fails: the stand-in cannot find sh on this PATH.
+    process.env.PATH = FAKE_SSH_DIR
+    await expect(sshHost("my-mac").info()).rejects.toThrow(/^Could not reach my-mac over SSH: .*not found/)
+  })
+
   test("caches the description once it succeeds, and only then", async () => {
     const host = sshHost("my-mac")
     process.env.PATH = join(FIXTURES, "missing")
-    await expect(host.info()).rejects.toThrow()
+    await expect(host.info()).rejects.toThrow(/^Could not reach my-mac over SSH: /)
     useFakeSsh()
     expect((await host.info()).home).toBe(home)
     process.env.PATH = join(FIXTURES, "missing")

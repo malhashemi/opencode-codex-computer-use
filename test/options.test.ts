@@ -95,11 +95,11 @@ function doctor(host: Host) {
 }
 
 describe("runDoctor", () => {
-  test("names the Computer Use machine when it cannot be reached", async () => {
+  test("stops at the platform check when the Computer Use machine cannot be reached", async () => {
     const host: Host = {
       ...sshHost("my-mac"),
       info: async () => {
-        throw new Error("ssh: Could not resolve hostname my-mac")
+        throw new Error("Could not reach my-mac over SSH: ssh: Could not resolve hostname my-mac")
       },
     }
     const report = await doctor(host)
@@ -183,7 +183,8 @@ describe("describeTool", () => {
     expect(describeTool(parseOptions({}))).not.toContain("SSH")
     const remote = describeTool(parseOptions({ ssh: "my-mac" }))
     expect(remote).toContain("are on my-mac (reached over SSH), a different machine")
-    expect(remote).toContain("local files are not visible there until copied")
+    expect(remote).toContain("local files are not visible there until copied (for example with `scp <file> my-mac:`).")
+    expect(remote.split("\n").filter((line) => line.includes("SSH"))).toHaveLength(1)
   })
 })
 

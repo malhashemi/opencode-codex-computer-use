@@ -115,8 +115,11 @@ export function sshHost(destination: string): Host {
       args: [...SSH_OPTIONS, "--", destination, [command, ...args].map(shellQuote).join(" ")],
     }),
     info: cacheSuccess(async () => {
-      // Usually the first connection: longer than ssh's ConnectTimeout, so ssh's own reason for failing gets through.
-      const output = await runOnHost(host, "sh", ["-c", INFO_SCRIPT], { timeoutMs: 30_000 })
+      // Usually the first contact with the machine, so its failure is what users see, from a tool call or the doctor:
+      // it names the machine, and waits longer than ssh's ConnectTimeout so ssh's own reason gets through.
+      const output = await runOnHost(host, "sh", ["-c", INFO_SCRIPT], { timeoutMs: 30_000 }).catch((error: unknown) => {
+        throw new Error(`Could not reach ${host.label}: ${error instanceof Error ? error.message : String(error)}`)
+      })
       const [system = "", machine = "", home = "", codexHome = "", version = ""] = output.split("\n")
       if (!system.trim() || !home) throw new Error(`unexpected system information: ${JSON.stringify(output)}`)
       const platform = system.trim().toLowerCase()

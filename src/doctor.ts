@@ -37,8 +37,7 @@ export async function runDoctor(
   try {
     info = await host.info()
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    add("Platform", "fail", host.remote ? `Could not reach ${host.label}: ${message}` : message)
+    add("Platform", "fail", error instanceof Error ? error.message : String(error))
     return report(checks, options)
   }
   add("Platform", ...platformCheck(info, host))
