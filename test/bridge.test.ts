@@ -3,6 +3,7 @@ import { mkdtempSync, readFileSync, existsSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { delimiter, join } from "node:path"
 
+import { AppServerClient } from "../src/app-server"
 import { ComputerUseBridge, SetupError } from "../src/bridge"
 import { localHost, sshHost, type Host } from "../src/host"
 
@@ -16,7 +17,31 @@ afterEach(async () => {
   delete process.env.FAKE_CODEX_NO_CUA
   delete process.env.FAKE_CODEX_POLICY
   delete process.env.FAKE_SSH_HOME
+  delete process.env.FAKE_CODEX_INIT_ERROR_ONCE
   process.env.PATH = PATH
+})
+
+describe("AppServerClient", () => {
+  test("tells its owner about an exit at once, while pending calls wait for the rest of stderr", async () => {
+    const at: Record<string, number> = {}
+    const client = await AppServerClient.start({
+      host: localHost(),
+      codexPath: FAKE_CODEX,
+      clientVersion: "test",
+      handlers: { onServerRequest: async () => ({}), onExit: () => (at.exit = performance.now()) },
+    })
+    const started = await client.request("thread/start", { ephemeral: true, cwd: "/tmp" })
+    await client
+      .request("mcpServer/tool/call", {
+        threadId: started.thread.id,
+        server: "cua_repl",
+        tool: "js",
+        arguments: { code: "EXIT_HELD" },
+      })
+      .catch(() => (at.rejected = performance.now()))
+    // EXIT_HELD leaves stderr open, so the rejection waits out the drain; the exit must not.
+    expect(at.rejected! - at.exit!).toBeGreaterThan(300)
+  })
 })
 
 function setup(
@@ -207,6 +232,27 @@ describe("ComputerUseBridge", () => {
     await expect(bridge.run("ses_a", "EXIT_LATE")).rejects.toThrow(
       "codex app-server exited (code 1, signal null): fake-codex: late reason",
     )
+  })
+
+  test("keeps an unfinished stderr line even when stderr stays open", async () => {
+    const { bridge } = setup()
+    await expect(bridge.run("ses_a", "EXIT_PARTIAL_HELD")).rejects.toThrow(
+      "codex app-server exited (code 1, signal null): fake-codex: unfinished reason",
+    )
+  })
+
+  test("a process from a failed startup never takes the place of the next one", async () => {
+    process.env.FAKE_CODEX_INIT_ERROR_ONCE = join(mkdtempSync(join(tmpdir(), "cua-init-")), "failed-once")
+    const { bridge, calls } = setup()
+    await expect(bridge.run("ses_a", "1 + 1")).rejects.toThrow("initialize failed")
+    expect(text(await bridge.run("ses_a", "2 + 2"))).toBe("ran on thread-1: 2 + 2")
+
+    // The first process exits a second after it was told to stop, long after the second one took over.
+    await Bun.sleep(1_500)
+    const again = await bridge.run("ses_a", "3 + 3")
+    expect(text(again)).toBe("ran on thread-1: 3 + 3")
+    expect(again.notes).toEqual([])
+    expect(calls("initialize")).toHaveLength(2)
   })
 
   test("does not wait for a leftover process that keeps stderr open", async () => {

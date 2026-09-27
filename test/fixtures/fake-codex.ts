@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 // Fake `codex app-server --listen stdio://` for tests. Appends every received message to $FAKE_CODEX_LOG.
 import { spawn } from "node:child_process"
-import { appendFileSync } from "node:fs"
+import { appendFileSync, existsSync, writeFileSync } from "node:fs"
 import { createInterface } from "node:readline"
 
 const log = process.env.FAKE_CODEX_LOG
@@ -25,8 +25,16 @@ createInterface({ input: process.stdin }).on("line", async (line) => {
   }
   const { id, method, params } = message
   switch (method) {
-    case "initialize":
+    case "initialize": {
+      // The first process fails to initialize and takes a second to exit when told to stop.
+      const marker = process.env.FAKE_CODEX_INIT_ERROR_ONCE
+      if (marker && !existsSync(marker)) {
+        writeFileSync(marker, "")
+        process.on("SIGTERM", () => setTimeout(() => process.exit(0), 1_000))
+        return send({ id, error: { code: -32000, message: "not ready" } })
+      }
       return send({ id, result: { userAgent: "fake" } })
+    }
     case "initialized":
       return
     case "thread/start":
@@ -65,6 +73,12 @@ async function toolCall(id: number, params: any) {
     // A leftover process keeps stderr open long after the exit.
     spawn("sleep", ["3"], { stdio: ["ignore", "ignore", "inherit"] })
     process.stderr.write("fake-codex: stopping, stderr stays open\n", () => process.exit(1))
+    return
+  }
+  if (code.includes("EXIT_PARTIAL_HELD")) {
+    // An unfinished line, then an exit while a leftover process keeps stderr open.
+    spawn("sleep", ["3"], { stdio: ["ignore", "ignore", "inherit"] })
+    process.stderr.write("fake-codex: unfinished reason", () => process.exit(1))
     return
   }
   if (code.includes("EXIT")) {

@@ -64,6 +64,8 @@ export class ComputerUseBridge {
   private client?: AppServerClient
   private starting?: Promise<AppServerClient>
   private generation = 0
+  /** Numbers every startup attempt, so a process from a failed attempt is never taken for a later one. */
+  private startups = 0
   private readonly sessions = new Map<string, SessionState>()
   private readonly approvalNotes = new Map<string, string[]>()
   private readonly restartedSessions = new Set<string>()
@@ -274,7 +276,7 @@ export class ComputerUseBridge {
             `$${CODEX_PATH_ENV}, ${[...BUNDLED_CODEX_PATHS, "PATH"].join(", ")}). ${SETUP_HELP}`,
         )
       }
-      const generation = this.generation + 1
+      const generation = ++this.startups
       const client = await AppServerClient.start({
         host: this.host,
         codexPath,

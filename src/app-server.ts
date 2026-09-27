@@ -59,7 +59,9 @@ export class AppServerClient {
   private nextID = 1
   private readonly pending = new Map<RequestID, Pending>()
   private readonly stderrTail: string[] = []
-  /** Settles once an exit has been handled: pending requests rejected and `onExit` called. */
+  /** Stderr received after the last newline. */
+  private stderrPartial = ""
+  /** Settles once an exit has been handled: `onExit` called and pending requests rejected. */
   private readonly exitHandled: Promise<void>
   private exited = false
 
@@ -68,18 +70,27 @@ export class AppServerClient {
     private readonly handlers: AppServerHandlers,
   ) {
     createInterface({ input: child.stdout }).on("line", (line) => this.receive(line))
-    const stderr = createInterface({ input: child.stderr })
-    stderr.on("line", (line) => {
-      if (line.trim()) this.stderrTail.push(line.trim())
-      if (this.stderrTail.length > STDERR_TAIL_LINES) this.stderrTail.shift()
-      handlers.onStderr?.(line)
+    // Read stderr by hand rather than with readline: an unfinished last line must still reach the exit error when
+    // stderr stays open after the exit.
+    child.stderr.setEncoding("utf8")
+    child.stderr.on("data", (chunk: string) => {
+      const lines = (this.stderrPartial + chunk).split(/\r?\n/)
+      this.stderrPartial = lines.pop() ?? ""
+      for (const line of lines) this.stderrLine(line)
     })
-    // readline emits a last line that has no newline just before it closes.
-    const stderrEnded = new Promise<void>((resolve) => stderr.once("close", () => resolve()))
+    const stderrEnded = new Promise<void>((resolve) =>
+      child.stderr.once("close", () => {
+        if (this.stderrPartial) this.stderrLine(this.stderrPartial)
+        this.stderrPartial = ""
+        resolve()
+      }),
+    )
     this.exitHandled = new Promise<void>((resolve) =>
       child.once("exit", (code, signal) => {
         this.exited = true
-        resolve(this.afterExit(code, signal, stderrEnded))
+        // The owner hears about the exit at once, before it can start a replacement it might confuse with this one.
+        handlers.onExit?.(code, signal)
+        resolve(this.rejectPending(code, signal, stderrEnded))
       }),
     )
     child.stdin.on("error", () => {})
@@ -176,7 +187,13 @@ export class AppServerClient {
     if (!this.exited) this.child.kill("SIGTERM")
   }
 
-  private async afterExit(
+  private stderrLine(line: string): void {
+    if (line.trim()) this.stderrTail.push(line.trim())
+    if (this.stderrTail.length > STDERR_TAIL_LINES) this.stderrTail.shift()
+    this.handlers.onStderr?.(line)
+  }
+
+  private async rejectPending(
     code: number | null,
     signal: NodeJS.Signals | null,
     stderrEnded: Promise<void>,
@@ -186,14 +203,14 @@ export class AppServerClient {
     let timer: ReturnType<typeof setTimeout> | undefined
     await Promise.race([stderrEnded, new Promise<void>((resolve) => (timer = setTimeout(resolve, STDERR_DRAIN_MS)))])
     clearTimeout(timer)
-    const tail = this.stderrTail.length ? `: ${this.stderrTail.join("\n")}` : ""
+    const lines = [...this.stderrTail, this.stderrPartial.trim()].filter(Boolean).slice(-STDERR_TAIL_LINES)
+    const tail = lines.length ? `: ${lines.join("\n")}` : ""
     const error = new AppServerClosedError(`codex app-server exited (code ${code}, signal ${signal})${tail}`)
     for (const pending of this.pending.values()) {
       clearTimeout(pending.timer)
       pending.reject(error)
     }
     this.pending.clear()
-    this.handlers.onExit?.(code, signal)
   }
 
   private write(message: unknown): void {
