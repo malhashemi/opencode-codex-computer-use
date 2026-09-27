@@ -166,31 +166,38 @@ export function runOnHost(
     const stdout: Buffer[] = []
     const stderr: Buffer[] = []
     let size = 0
-    let failure: Error | undefined
-    const stop = (error: Error) => {
-      failure ??= error
-      child.kill("SIGKILL")
+    let settled = false
+    const settle = (error: Error | undefined, output = "") => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      if (error) reject(error)
+      else resolve(output)
     }
-    const timer = setTimeout(() => stop(new Error(`${command} timed out after ${timeoutMs} ms`)), timeoutMs)
+    // Settles at once instead of waiting for "close": descendants of the process (or an ssh ProxyCommand) can keep
+    // its output open long after it is killed, and our ends of the pipes must not wait for them.
+    const abandon = (error: Error) => {
+      settle(error)
+      child.kill("SIGKILL")
+      child.stdin.destroy()
+      child.stdout.destroy()
+      child.stderr.destroy()
+    }
+    const timer = setTimeout(() => abandon(new Error(`${command} timed out after ${timeoutMs} ms`)), timeoutMs)
 
     child.stdout.on("data", (chunk: Buffer) => {
-      if (failure) return
+      if (settled) return
       size += chunk.length
-      if (size > maxBuffer) return stop(new Error(`${command} wrote more than ${maxBuffer} bytes`))
+      if (size > maxBuffer) return abandon(new Error(`${command} wrote more than ${maxBuffer} bytes`))
       stdout.push(chunk)
     })
     child.stderr.on("data", (chunk: Buffer) => stderr.push(chunk))
-    child.once("error", (error) => {
-      clearTimeout(timer)
-      reject(error)
-    })
+    child.once("error", (error) => settle(error))
     child.once("close", (code, signal) => {
-      clearTimeout(timer)
-      if (failure) return reject(failure)
-      if (code === 0) return resolve(Buffer.concat(stdout).toString("utf8"))
+      if (code === 0) return settle(undefined, Buffer.concat(stdout).toString("utf8"))
       const message = Buffer.concat(stderr).toString("utf8").trim()
       const status = code === null ? `was stopped by ${signal}` : `exited with code ${code}`
-      reject(new Error(message || `${command} ${status}`))
+      settle(new Error(message || `${command} ${status}`))
     })
     // The process may exit without reading its input.
     child.stdin.on("error", () => {})

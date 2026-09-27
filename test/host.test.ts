@@ -95,6 +95,20 @@ describe("runOnHost", () => {
     expect(performance.now() - started).toBeLessThan(2_000)
   })
 
+  test("gives up at once even when leftover processes keep the output open", async () => {
+    const started = performance.now()
+    await expect(runOnHost(localHost(), "/bin/sh", ["-c", "sleep 5 & sleep 5"], { timeoutMs: 100 })).rejects.toThrow(
+      "/bin/sh timed out after 100 ms",
+    )
+    await expect(
+      runOnHost(localHost(), "/bin/sh", ["-c", "sleep 5 & head -c 100000 /dev/zero"], {
+        timeoutMs: 5_000,
+        maxBuffer: 1_000,
+      }),
+    ).rejects.toThrow("/bin/sh wrote more than 1000 bytes")
+    expect(performance.now() - started).toBeLessThan(1_000)
+  })
+
   test("kills the process when stdout exceeds maxBuffer", async () => {
     await expect(runOnHost(localHost(), "sh", ["-c", "yes | head -c 100000"], { maxBuffer: 1_000 })).rejects.toThrow(
       "sh wrote more than 1000 bytes",
