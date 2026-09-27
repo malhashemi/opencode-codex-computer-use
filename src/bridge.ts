@@ -224,6 +224,8 @@ export class ComputerUseBridge {
   async dispose(): Promise<void> {
     this.disposed = true
     clearTimeout(this.idleTimer)
+    // A startup in flight sees `disposed` and closes what it started; wait for it so no app-server outlives the plugin.
+    await this.starting?.catch(() => {})
     await this.stop()
   }
 
@@ -257,12 +259,14 @@ export class ComputerUseBridge {
   }
 
   private ensureClient(): Promise<AppServerClient> {
-    if (this.disposed) return Promise.reject(new Error("opencode-codex-computer-use has been unloaded"))
+    if (this.disposed) return Promise.reject(unloadedError())
     if (this.client && !this.client.closed) return Promise.resolve(this.client)
     if (this.starting) return this.starting
 
     this.starting = (async () => {
       const codexPath = await this.codexPath()
+      // Finding codex can take an SSH round trip, long enough for the plugin to be unloaded meanwhile.
+      if (this.disposed) throw unloadedError()
       const where = this.host.remote ? ` on ${this.host.label}` : ""
       if (!codexPath) {
         throw new SetupError(
@@ -281,6 +285,10 @@ export class ComputerUseBridge {
           onTraffic: this.options.onTraffic,
         },
       })
+      if (this.disposed) {
+        await client.close()
+        throw unloadedError()
+      }
       this.generation = generation
       this.client = client
       this.options.log(`started codex app-server (pid ${client.pid}) from ${codexPath}${where}`)
@@ -387,6 +395,10 @@ export class ComputerUseBridge {
     wrapped.name = base.name
     return wrapped
   }
+}
+
+function unloadedError(): Error {
+  return new Error("opencode-codex-computer-use has been unloaded")
 }
 
 function appName(params: any): string | undefined {

@@ -242,6 +242,51 @@ describe("ComputerUseBridge", () => {
     await expect(bridge.run("ses_a", "1 + 1")).rejects.toThrow(/^Could not reach my-mac over SSH: /)
   })
 
+  test("does not start Codex when the plugin is unloaded while it looks for codex", async () => {
+    let lookedUp!: () => void
+    let release!: () => void
+    const lookingUp = new Promise<void>((resolve) => (lookedUp = resolve))
+    const released = new Promise<void>((resolve) => (release = resolve))
+    const local = localHost()
+    const host: Host = {
+      ...local,
+      findExecutable: async (candidates, name) => {
+        lookedUp()
+        await released
+        return local.findExecutable(candidates, name)
+      },
+    }
+    const { bridge, calls } = setup({ host })
+
+    const call = bridge.run("ses_a", "1 + 1")
+    await lookingUp
+    const disposed = bridge.dispose()
+    release()
+    await expect(call).rejects.toThrow("opencode-codex-computer-use has been unloaded")
+    await disposed
+    expect(calls("initialize")).toHaveLength(0)
+  })
+
+  test("closes an app-server that finished starting after the plugin was unloaded", async () => {
+    let disposed: Promise<void> | undefined
+    const local = localHost()
+    const host: Host = {
+      ...local,
+      // Unloads the plugin just as the app-server is being started.
+      command: (command, args) => {
+        disposed ??= bridge.dispose()
+        return local.command(command, args)
+      },
+    }
+    const { bridge, calls, logs } = setup({ host })
+
+    await expect(bridge.run("ses_a", "1 + 1")).rejects.toThrow("opencode-codex-computer-use has been unloaded")
+    await disposed
+    expect(calls("initialize")).toHaveLength(1)
+    expect(calls("thread/start")).toHaveLength(0)
+    expect(logs.some((line) => line.startsWith("codex app-server exited"))).toBe(true)
+  })
+
   test("stops the app-server after the idle timeout", async () => {
     const { bridge, calls, logs } = setup({ idleShutdownMs: 200 })
     await bridge.run("ses_a", "x")
