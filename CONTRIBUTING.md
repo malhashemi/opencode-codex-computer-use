@@ -23,7 +23,9 @@ bun run check     # formatting, lint, types, tests
 bun run doctor    # read-only check against the real engine
 ```
 
-`bun test` runs against a fake `codex app-server` (`test/fixtures/fake-codex.ts`) and never touches your apps.
+`bun test` runs against a fake `codex app-server` (`test/fixtures/fake-codex.ts`) and a stand-in `ssh`
+(`test/fixtures/fake-ssh/ssh`, which runs the remote command on your machine), and never touches your apps. To check a
+Mac over SSH, run `bun scripts/smoke.ts --ssh my-mac`.
 
 ### Running the plugin from your checkout
 
@@ -37,9 +39,10 @@ project's `plugins`. After editing, run `opencode api post /api/location/reload`
 | ------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
 | `src/index.ts`      | Plugin entry: options, the `computer_use` tools, the doctor command, turn and session events                                   |
 | `src/bridge.ts`     | One `codex app-server` per plugin instance, one ephemeral Codex thread per OpenCode session, app-access prompts, turn metadata |
-| `src/app-server.ts` | JSON-RPC client for `codex app-server --listen stdio://`                                                                       |
+| `src/app-server.ts` | JSON-RPC client for `codex app-server --listen stdio://`, started on the host; its last stderr lines explain an exit           |
+| `src/host.ts`       | Where Codex runs: this machine, or another one over SSH; runs commands there and reports its platform and home folder          |
 | `src/content.ts`    | Converts Codex results to OpenCode content: screenshots, OCR, output cap                                                       |
-| `src/ocr.ts`        | On-device OCR with the macOS Vision framework                                                                                  |
+| `src/ocr.ts`        | On-device OCR with the macOS Vision framework, on the host, with the screenshot on stdin                                       |
 | `src/surfaces.ts`   | Turns native apps or browser tabs off inside the runtime                                                                       |
 | `src/doctor.ts`     | Setup checks shared by `/computer-use-doctor` and `scripts/smoke.ts`                                                           |
 
