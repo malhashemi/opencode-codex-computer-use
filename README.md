@@ -59,8 +59,10 @@ Nothing in Codex has to be configured by hand. You need a working Computer Use i
 The ChatGPT app does not need to be open while you use OpenCode.
 
 **Windows and Linux (experimental):** Codex Computer Use also runs on Windows, and its runtime has a Linux target. The
-plugin itself is platform-neutral (it only talks to `codex app-server`), but it has only been tested on macOS. On
-other platforms, `codex` is found through `PATH` or the `codexPath` option, and OCR is not available yet.
+plugin itself is platform-neutral (it only talks to `codex app-server`), but it has only been tested with Computer Use
+running on macOS. When Computer Use runs on another platform, `codex` is found through `PATH` or the `codexPath`
+option, and OCR is not available there yet. These notes are about the machine that runs Computer Use; OpenCode itself
+can run on another machine, as the next paragraph explains.
 
 **OpenCode on another machine:** OpenCode can also run somewhere else, such as a Linux VM, and operate the apps on a Mac
 it reaches over SSH. See [Run Computer Use on another Mac (SSH)](#run-computer-use-on-another-mac-ssh).
