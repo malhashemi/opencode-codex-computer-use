@@ -7,6 +7,8 @@ type RequestID = number | string
 
 /** Non-empty stderr lines kept for the error raised when the app-server exits. */
 const STDERR_TAIL_LINES = 3
+/** How long an exit waits for the rest of stderr, which a leftover process could keep open indefinitely. */
+const STDERR_DRAIN_MS = 500
 
 interface Pending {
   method: string
@@ -57,6 +59,8 @@ export class AppServerClient {
   private nextID = 1
   private readonly pending = new Map<RequestID, Pending>()
   private readonly stderrTail: string[] = []
+  /** Settles once an exit has been handled: pending requests rejected and `onExit` called. */
+  private readonly exitHandled: Promise<void>
   private exited = false
 
   private constructor(
@@ -64,23 +68,20 @@ export class AppServerClient {
     private readonly handlers: AppServerHandlers,
   ) {
     createInterface({ input: child.stdout }).on("line", (line) => this.receive(line))
-    createInterface({ input: child.stderr }).on("line", (line) => {
+    const stderr = createInterface({ input: child.stderr })
+    stderr.on("line", (line) => {
       if (line.trim()) this.stderrTail.push(line.trim())
       if (this.stderrTail.length > STDERR_TAIL_LINES) this.stderrTail.shift()
       handlers.onStderr?.(line)
     })
-    child.on("exit", (code, signal) => {
-      this.exited = true
-      // The exit code alone does not say why; the last stderr lines usually do (for example an SSH error).
-      const tail = this.stderrTail.length ? `: ${this.stderrTail.join("\n")}` : ""
-      const error = new AppServerClosedError(`codex app-server exited (code ${code}, signal ${signal})${tail}`)
-      for (const pending of this.pending.values()) {
-        clearTimeout(pending.timer)
-        pending.reject(error)
-      }
-      this.pending.clear()
-      handlers.onExit?.(code, signal)
-    })
+    // readline emits a last line that has no newline just before it closes.
+    const stderrEnded = new Promise<void>((resolve) => stderr.once("close", () => resolve()))
+    this.exitHandled = new Promise<void>((resolve) =>
+      child.once("exit", (code, signal) => {
+        this.exited = true
+        resolve(this.afterExit(code, signal, stderrEnded))
+      }),
+    )
     child.stdin.on("error", () => {})
   }
 
@@ -165,16 +166,34 @@ export class AppServerClient {
 
   /** Closes stdin so the app-server shuts down cleanly; kills it if it does not exit in time. */
   async close(timeoutMs = 5_000): Promise<void> {
-    if (this.exited) return
-    const exited = new Promise<void>((resolve) => this.child.once("exit", () => resolve()))
-    this.child.stdin.end()
+    if (!this.exited) this.child.stdin.end()
     const timer = setTimeout(() => this.kill(), timeoutMs)
-    await exited
+    await this.exitHandled
     clearTimeout(timer)
   }
 
   kill(): void {
     if (!this.exited) this.child.kill("SIGTERM")
+  }
+
+  private async afterExit(
+    code: number | null,
+    signal: NodeJS.Signals | null,
+    stderrEnded: Promise<void>,
+  ): Promise<void> {
+    // The exit code alone does not say why; the last stderr lines usually do (for example an SSH error). They can
+    // still be on their way when the process has exited, so wait for the rest of stderr, but only briefly.
+    let timer: ReturnType<typeof setTimeout> | undefined
+    await Promise.race([stderrEnded, new Promise<void>((resolve) => (timer = setTimeout(resolve, STDERR_DRAIN_MS)))])
+    clearTimeout(timer)
+    const tail = this.stderrTail.length ? `: ${this.stderrTail.join("\n")}` : ""
+    const error = new AppServerClosedError(`codex app-server exited (code ${code}, signal ${signal})${tail}`)
+    for (const pending of this.pending.values()) {
+      clearTimeout(pending.timer)
+      pending.reject(error)
+    }
+    this.pending.clear()
+    this.handlers.onExit?.(code, signal)
   }
 
   private write(message: unknown): void {

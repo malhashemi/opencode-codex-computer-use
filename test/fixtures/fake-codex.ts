@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 // Fake `codex app-server --listen stdio://` for tests. Appends every received message to $FAKE_CODEX_LOG.
+import { spawn } from "node:child_process"
 import { appendFileSync } from "node:fs"
 import { createInterface } from "node:readline"
 
@@ -55,6 +56,17 @@ async function toolCall(id: number, params: any) {
   }
   if (params.tool !== "js") return send({ id, result: { content: [{ type: "text", text: "{}" }] } })
   const code: string = params.arguments.code
+  if (code.includes("EXIT_LATE")) {
+    // A leftover process writes the reason after the exit, without a final newline.
+    spawn("sh", ["-c", "sleep 0.2; printf 'fake-codex: late reason' >&2"], { stdio: ["ignore", "ignore", "inherit"] })
+    process.exit(1)
+  }
+  if (code.includes("EXIT_HELD")) {
+    // A leftover process keeps stderr open long after the exit.
+    spawn("sleep", ["3"], { stdio: ["ignore", "ignore", "inherit"] })
+    process.stderr.write("fake-codex: stopping, stderr stays open\n", () => process.exit(1))
+    return
+  }
   if (code.includes("EXIT")) {
     process.stderr.write("fake-codex: stopping on request\n", () => process.exit(1))
     return

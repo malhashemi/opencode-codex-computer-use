@@ -202,6 +202,21 @@ describe("ComputerUseBridge", () => {
     )
   })
 
+  test("includes stderr output that arrives after the exit, even without a final newline", async () => {
+    const { bridge } = setup()
+    await expect(bridge.run("ses_a", "EXIT_LATE")).rejects.toThrow(
+      "codex app-server exited (code 1, signal null): fake-codex: late reason",
+    )
+  })
+
+  test("does not wait for a leftover process that keeps stderr open", async () => {
+    const { bridge } = setup()
+    await bridge.run("ses_a", "warm up")
+    const started = performance.now()
+    await expect(bridge.run("ses_a", "EXIT_HELD")).rejects.toThrow("fake-codex: stopping, stderr stays open")
+    expect(performance.now() - started).toBeLessThan(1_500)
+  })
+
   test("cancelling a call rejects it and interrupts the turn", async () => {
     const { bridge, calls } = setup()
     await bridge.run("ses_a", "warm up")
