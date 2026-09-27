@@ -1,6 +1,6 @@
-import { describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, test } from "bun:test"
 import { homedir } from "node:os"
-import { join } from "node:path"
+import { delimiter, join } from "node:path"
 
 import { ComputerUseBridge } from "../src/bridge"
 import { stripImages } from "../src/debug"
@@ -95,6 +95,12 @@ function doctor(host: Host) {
 }
 
 describe("runDoctor", () => {
+  const PATH = process.env.PATH
+
+  afterEach(() => {
+    process.env.PATH = PATH
+  })
+
   test("stops at the platform check when the Computer Use machine cannot be reached", async () => {
     const host: Host = {
       ...sshHost("my-mac"),
@@ -135,6 +141,23 @@ describe("runDoctor", () => {
       { name: "codex executable", status: "fail", detail: expect.stringMatching(/^Not found on my-mac over SSH\. /) },
     ])
     expect(searched[0]).toContain("/Applications/ChatGPT.app/Contents/Resources/codex")
+  })
+
+  test("reports a Mac that stops answering after the platform check", async () => {
+    const fakeSsh = join(import.meta.dir, "fixtures", "fake-ssh")
+    process.env.PATH = `${fakeSsh}${delimiter}${PATH}`
+    const host = sshHost("my-mac")
+    await host.info()
+    // From now on the stand-in ssh starts but cannot run the remote command.
+    process.env.PATH = fakeSsh
+
+    const report = await doctor(host)
+    expect(report.ok).toBe(false)
+    expect(report.checks.map((check) => check.name)).toEqual(["Platform", "codex executable"])
+    expect(report.checks[1]).toMatchObject({
+      status: "fail",
+      detail: expect.stringMatching(/^Could not reach my-mac over SSH: /),
+    })
   })
 })
 

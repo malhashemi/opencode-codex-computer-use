@@ -180,6 +180,16 @@ describe("sshHost through a stand-in ssh", () => {
     await expect(sshHost("my-mac").info()).rejects.toThrow(/^Could not reach my-mac over SSH: .*not found/)
   })
 
+  test("names the machine when it stops answering after the first contact", async () => {
+    useFakeSsh()
+    const host = sshHost("my-mac")
+    await host.info()
+    process.env.PATH = FAKE_SSH_DIR
+    await expect(host.findExecutable([FAKE_CODEX], "codex")).rejects.toThrow(
+      /^Could not reach my-mac over SSH: .*not found/,
+    )
+  })
+
   test("caches the description once it succeeds, and only then", async () => {
     const host = sshHost("my-mac")
     process.env.PATH = join(FIXTURES, "missing")

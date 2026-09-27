@@ -42,7 +42,13 @@ export async function runDoctor(
   }
   add("Platform", ...platformCheck(info, host))
 
-  const codexPath = await bridge.codexPath()
+  let codexPath: string | undefined
+  try {
+    codexPath = await bridge.codexPath()
+  } catch (error) {
+    add("codex executable", "fail", error instanceof Error ? error.message : String(error))
+    return report(checks, options)
+  }
   if (!codexPath) {
     add(
       "codex executable",

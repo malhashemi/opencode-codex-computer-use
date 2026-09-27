@@ -105,6 +105,10 @@ const FIND_SCRIPT =
 
 /** Another machine, reached with the system `ssh` and the user's SSH configuration for `destination`. */
 export function sshHost(destination: string): Host {
+  // Neither script can fail on its own, so a failure means the machine could not be reached; users see these first,
+  // from a tool call or the doctor, so they name the machine.
+  const unreachable = (error: unknown) =>
+    new Error(`Could not reach ${host.label}: ${error instanceof Error ? error.message : String(error)}`)
   const host: Host = {
     remote: true,
     label: `${destination} over SSH`,
@@ -115,10 +119,10 @@ export function sshHost(destination: string): Host {
       args: [...SSH_OPTIONS, "--", destination, [command, ...args].map(shellQuote).join(" ")],
     }),
     info: cacheSuccess(async () => {
-      // Usually the first contact with the machine, so its failure is what users see, from a tool call or the doctor:
-      // it names the machine, and waits longer than ssh's ConnectTimeout so ssh's own reason gets through.
+      // Usually the first contact with the machine: wait longer than ssh's ConnectTimeout so ssh's own reason gets
+      // through.
       const output = await runOnHost(host, "sh", ["-c", INFO_SCRIPT], { timeoutMs: 30_000 }).catch((error: unknown) => {
-        throw new Error(`Could not reach ${host.label}: ${error instanceof Error ? error.message : String(error)}`)
+        throw unreachable(error)
       })
       const [system = "", machine = "", home = "", codexHome = "", version = ""] = output.split("\n")
       if (!system.trim() || !home) throw new Error(`unexpected system information: ${JSON.stringify(output)}`)
@@ -133,7 +137,9 @@ export function sshHost(destination: string): Host {
     }),
     findExecutable: async (candidates, name) => {
       const paths = candidates.filter((candidate): candidate is string => !!candidate)
-      const output = await runOnHost(host, "sh", ["-c", FIND_SCRIPT, "sh", name, ...paths])
+      const output = await runOnHost(host, "sh", ["-c", FIND_SCRIPT, "sh", name, ...paths]).catch((error: unknown) => {
+        throw unreachable(error)
+      })
       return output.trim() || undefined
     },
     exists: (path) =>
