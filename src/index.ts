@@ -4,6 +4,8 @@ import { ComputerUseBridge } from "./bridge"
 import { textOf, toToolContent } from "./content"
 import { trafficLogger } from "./debug"
 import { runDoctor } from "./doctor"
+import { localHost, sshHost } from "./host"
+import { recognizeText } from "./ocr"
 import { parseOptions, type Options } from "./options"
 import { surfaceGuard } from "./surfaces"
 
@@ -23,6 +25,8 @@ export function describeTool(options: Options): string {
   const targets = [apps && "native desktop apps", browser && "Chrome tabs"].filter(Boolean).join(" and ")
   const lines = [
     `Operate ${targets} through the Codex Computer Use engine installed with the ChatGPT/Codex desktop app.`,
+    options.ssh &&
+      `The ${targets} are on ${options.ssh} (reached over SSH), a different machine from the one your shell and file tools use, so local files are not visible there until copied (for example with \`scp <file> ${options.ssh}:\`).`,
     "",
     "Runs JavaScript in a persistent runtime (per OpenCode session) where a `cua` object is preloaded. Variables persist between calls.",
     apps &&
@@ -62,8 +66,10 @@ export default Plugin.define({
   async setup(ctx) {
     const options = parseOptions(ctx.options)
     for (const warning of options.warnings) log(warning)
+    const host = options.ssh ? sshHost(options.ssh) : localHost()
     const bridge = new ComputerUseBridge({
       ...options,
+      host,
       cwd: ctx.location.directory,
       version: VERSION,
       log,
@@ -100,7 +106,10 @@ export default Plugin.define({
           }
           const surface = result.meta?.["codex/toolSurface"] as { app?: { appId?: string } } | undefined
           return {
-            content: await toToolContent(result.content, result.notes, options),
+            content: await toToolContent(result.content, result.notes, {
+              ...options,
+              ocr: (image) => recognizeText(host, image),
+            }),
             metadata: { app: surface?.app?.appId },
           }
         },

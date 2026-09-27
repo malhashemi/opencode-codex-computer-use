@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test"
 
 import { imageMime, textOf, toToolContent } from "../src/content"
-import { formatOcr, type OcrResult } from "../src/ocr"
+import { localHost, type Host } from "../src/host"
+import { formatOcr, recognizeText, type OcrResult } from "../src/ocr"
 
 const IMAGE = { type: "image", data: "/9j/4AAQSkZJRg==", mimeType: "image/png" }
 const fakeOcr = async (): Promise<OcrResult> => ({
@@ -53,6 +54,13 @@ describe("toToolContent", () => {
     expect((content[0] as { text: string }).text).toContain("text recognition failed (no vision)")
   })
 
+  test("OCR modes without a text recognizer report the failure per screenshot", async () => {
+    const content = await toToolContent([IMAGE, IMAGE], [], { screenshots: "both" })
+    expect(content.map((item) => item.type)).toEqual(["file", "text", "file", "text"])
+    expect((content[1] as { text: string }).text).toStartWith("Screenshot 1: text recognition failed (")
+    expect((content[3] as { text: string }).text).toStartWith("Screenshot 2: text recognition failed (")
+  })
+
   test("caps text output and explains how to narrow it; notes and images are kept", async () => {
     const big = "x".repeat(3000)
     const content = await toToolContent(
@@ -97,6 +105,16 @@ describe("toToolContent", () => {
         { type: "text", text: "b" },
       ]),
     ).toBe("a\nb")
+  })
+})
+
+describe("recognizeText", () => {
+  test("needs macOS on the Computer Use machine", async () => {
+    const local = localHost()
+    const linux: Host = { ...local, info: async () => ({ ...(await local.info()), platform: "linux" }) }
+    await expect(recognizeText(linux, new Uint8Array())).rejects.toThrow(
+      "on-device OCR needs macOS on the Computer Use machine; use the accessibility tree",
+    )
   })
 })
 

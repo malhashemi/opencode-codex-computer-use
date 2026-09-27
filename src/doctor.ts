@@ -1,10 +1,8 @@
-import { execFile } from "node:child_process"
-import { existsSync } from "node:fs"
-import { homedir } from "node:os"
-import { join } from "node:path"
+import { posix } from "node:path"
 
 import { CUA_SERVER, type ComputerUseBridge, type McpContentBlock } from "./bridge"
 import { imageMime, textOf } from "./content"
+import { runOnHost, type Host, type HostInfo } from "./host"
 import { recognizeText } from "./ocr"
 import type { Options } from "./options"
 
@@ -24,7 +22,8 @@ export interface DoctorReport {
   text: string
 }
 
-/** Read-only checks of everything the plugin needs. Uses its own throwaway Codex thread. */
+/** Read-only checks of everything the plugin needs, on the machine that runs Codex. Uses its own throwaway Codex
+ *  thread. */
 export async function runDoctor(
   bridge: ComputerUseBridge,
   options: Options,
@@ -33,21 +32,36 @@ export async function runDoctor(
   const checks: Check[] = []
   const add = (name: string, status: Status, detail: string) => checks.push({ name, status, detail })
 
-  add("Platform", ...(await platformCheck()))
+  const host = bridge.host
+  let info: HostInfo
+  try {
+    info = await host.info()
+  } catch (error) {
+    add("Platform", "fail", error instanceof Error ? error.message : String(error))
+    return report(checks, options)
+  }
+  add("Platform", ...platformCheck(info, host))
 
-  const codexPath = bridge.codexPath
+  let codexPath: string | undefined
+  try {
+    codexPath = await bridge.codexPath()
+  } catch (error) {
+    add("codex executable", "fail", error instanceof Error ? error.message : String(error))
+    return report(checks, options)
+  }
   if (!codexPath) {
     add(
       "codex executable",
       "fail",
-      "Not found. Install the ChatGPT (or Codex) desktop app, or set the `codexPath` option.",
+      `Not found${host.remote ? ` on ${host.label}` : ""}. Install the ChatGPT (or Codex) desktop app, or set the ` +
+        "`codexPath` option.",
     )
     return report(checks, options)
   }
-  const version = await run(codexPath, ["--version"]).catch(() => "unknown version")
+  const version = await runOnHost(host, codexPath, ["--version"]).catch(() => "unknown version")
   add("codex executable", "ok", `${codexPath} (${version.trim()})`)
 
-  if (process.platform === "darwin") add("Computer Use app", ...(await computerUseAppCheck()))
+  if (info.platform === "darwin") add("Computer Use app", ...(await computerUseAppCheck(host, info)))
 
   try {
     const names = await bridge.serverNames(sessionKey)
@@ -73,7 +87,7 @@ export async function runDoctor(
         count ? `Engine reachable, ${count} apps listed` : firstLine(apps.content, "Could not list apps"),
       )
 
-      if (process.platform === "darwin" && count) {
+      if (info.platform === "darwin" && count) {
         const shot = await probe(
           'const __doctorFinder = await cua.getApp("com.apple.finder"); await __doctorFinder.getScreenshot({ emit: true }); nodeRepl.write("SHOT");',
         ).catch((error: unknown) => ({
@@ -89,7 +103,7 @@ export async function runDoctor(
             : `No screenshot: ${firstLine(shot.content, "unknown error")}. Check Screen Recording permission for Codex Computer Use.`,
         )
         if (options.screenshots === "ocr" || options.screenshots === "both") {
-          add("OCR", ...(await ocrCheck(image?.data)))
+          add("OCR", ...(await ocrCheck(host, image?.data)))
         }
       }
     } else {
@@ -146,46 +160,48 @@ export function approvalCheck(policy: string | undefined): [Status, string] {
   ]
 }
 
-async function platformCheck(): Promise<[Status, string]> {
-  if (process.platform === "darwin") {
-    const version = (await run("/usr/bin/sw_vers", ["-productVersion"]).catch(() => "")).trim()
+function platformCheck(info: HostInfo, host: Host): [Status, string] {
+  const on = (system: string) => (host.remote ? `${system} on ${host.label}` : system)
+  if (info.platform === "darwin") {
+    const version = info.osVersion ?? ""
     const [major = 0, minor = 0] = version.split(".").map(Number)
     const supported = major > 14 || (major === 14 && minor >= 4)
-    if (process.arch !== "arm64")
-      return ["fail", `macOS ${version} on ${process.arch}: Computer Use requires Apple Silicon`]
+    if (info.arch !== "arm64")
+      return ["fail", `${on(`macOS ${version} on ${info.arch}`)}: Computer Use requires Apple Silicon`]
     return supported
-      ? ["ok", `macOS ${version} (arm64)`]
-      : ["fail", `macOS ${version}: Computer Use requires 14.4 or later`]
+      ? ["ok", on(`macOS ${version} (arm64)`)]
+      : ["fail", `${on(`macOS ${version}`)}: Computer Use requires 14.4 or later`]
   }
-  if (process.platform === "win32" || process.platform === "linux") {
+  if (info.platform === "win32" || info.platform === "linux") {
     return [
       "warn",
-      `${process.platform} (${process.arch}): supported by Codex Computer Use, experimental in this plugin`,
+      `${on(`${info.platform} (${info.arch})`)}: supported by Codex Computer Use, experimental in this plugin`,
     ]
   }
-  return ["fail", `${process.platform} is not supported by Codex Computer Use`]
+  return ["fail", `${on(info.platform)} is not supported by Codex Computer Use`]
 }
 
-async function computerUseAppCheck(): Promise<[Status, string]> {
-  const codexHome = process.env.CODEX_HOME || join(homedir(), ".codex")
-  const app = join(codexHome, "computer-use", "Codex Computer Use.app")
-  if (!existsSync(app)) return ["fail", `Not installed at ${app}. Turn on Computer Use in the ChatGPT/Codex app.`]
-  const version = await run("/usr/bin/plutil", [
+async function computerUseAppCheck(host: Host, info: HostInfo): Promise<[Status, string]> {
+  const app = posix.join(info.codexHome, "computer-use", "Codex Computer Use.app")
+  if (!(await host.exists(app))) {
+    return ["fail", `Not installed at ${app}. Turn on Computer Use in the ChatGPT/Codex app.`]
+  }
+  const version = await runOnHost(host, "/usr/bin/plutil", [
     "-extract",
     "CFBundleShortVersionString",
     "raw",
-    join(app, "Contents", "Info.plist"),
+    posix.join(app, "Contents", "Info.plist"),
   ])
     .then((out) => out.trim())
     .catch(() => "unknown version")
   return ["ok", `${app} (${version})`]
 }
 
-async function ocrCheck(data: string | undefined): Promise<[Status, string]> {
+async function ocrCheck(host: Host, data: string | undefined): Promise<[Status, string]> {
   if (!data) return ["skip", "No screenshot to test with"]
   try {
     const started = performance.now()
-    const result = await recognizeText(Buffer.from(data, "base64"))
+    const result = await recognizeText(host, Buffer.from(data, "base64"))
     return ["ok", `${result.lines.length} text lines recognized in ${Math.round(performance.now() - started)} ms`]
   } catch (error) {
     return ["fail", `On-device OCR failed: ${error instanceof Error ? error.message : String(error)}`]
@@ -198,10 +214,4 @@ function firstLine(blocks: readonly McpContentBlock[], fallback: string): string
       .split("\n")
       .find((line) => line.trim() && !line.startsWith("#")) ?? fallback
   ).slice(0, 300)
-}
-
-function run(command: string, args: string[]): Promise<string> {
-  return new Promise((resolve, reject) =>
-    execFile(command, args, { timeout: 15_000 }, (error, stdout) => (error ? reject(error) : resolve(stdout))),
-  )
 }

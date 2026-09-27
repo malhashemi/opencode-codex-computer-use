@@ -1,7 +1,14 @@
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process"
+import type { ChildProcessWithoutNullStreams } from "node:child_process"
 import { createInterface } from "node:readline"
 
+import { spawnOnHost, type Host } from "./host"
+
 type RequestID = number | string
+
+/** Non-empty stderr lines kept for the error raised when the app-server exits. */
+const STDERR_TAIL_LINES = 3
+/** How long an exit waits for the rest of stderr, which a leftover process could keep open indefinitely. */
+const STDERR_DRAIN_MS = 500
 
 interface Pending {
   method: string
@@ -51,6 +58,11 @@ export interface RequestOptions {
 export class AppServerClient {
   private nextID = 1
   private readonly pending = new Map<RequestID, Pending>()
+  private readonly stderrTail: string[] = []
+  /** Stderr received after the last newline. */
+  private stderrPartial = ""
+  /** Settles once an exit has been handled: `onExit` called and pending requests rejected. */
+  private readonly exitHandled: Promise<void>
   private exited = false
 
   private constructor(
@@ -58,35 +70,48 @@ export class AppServerClient {
     private readonly handlers: AppServerHandlers,
   ) {
     createInterface({ input: child.stdout }).on("line", (line) => this.receive(line))
-    createInterface({ input: child.stderr }).on("line", (line) => handlers.onStderr?.(line))
-    child.on("exit", (code, signal) => {
-      this.exited = true
-      const error = new AppServerClosedError(`codex app-server exited (code ${code}, signal ${signal})`)
-      for (const pending of this.pending.values()) {
-        clearTimeout(pending.timer)
-        pending.reject(error)
-      }
-      this.pending.clear()
-      handlers.onExit?.(code, signal)
+    // Read stderr by hand rather than with readline: an unfinished last line must still reach the exit error when
+    // stderr stays open after the exit.
+    child.stderr.setEncoding("utf8")
+    child.stderr.on("data", (chunk: string) => {
+      const lines = (this.stderrPartial + chunk).split(/\r?\n/)
+      this.stderrPartial = lines.pop() ?? ""
+      for (const line of lines) this.stderrLine(line)
     })
+    const stderrEnded = new Promise<void>((resolve) =>
+      child.stderr.once("close", () => {
+        if (this.stderrPartial) this.stderrLine(this.stderrPartial)
+        this.stderrPartial = ""
+        resolve()
+      }),
+    )
+    this.exitHandled = new Promise<void>((resolve) =>
+      child.once("exit", (code, signal) => {
+        this.exited = true
+        // The owner hears about the exit at once, before it can start a replacement it might confuse with this one.
+        handlers.onExit?.(code, signal)
+        resolve(this.rejectPending(code, signal, stderrEnded))
+      }),
+    )
     child.stdin.on("error", () => {})
   }
 
   static async start(input: {
+    host: Host
     codexPath: string
     clientVersion: string
     handlers: AppServerHandlers
     timeoutMs?: number
   }): Promise<AppServerClient> {
-    const child = spawn(input.codexPath, ["app-server", "--listen", "stdio://"], {
-      stdio: ["pipe", "pipe", "pipe"],
-      env: process.env,
-    })
+    const child = spawnOnHost(input.host, input.codexPath, ["app-server", "--listen", "stdio://"])
     const spawned = await new Promise<Error | undefined>((resolve) => {
       child.once("spawn", () => resolve(undefined))
       child.once("error", (error) => resolve(error))
     })
-    if (spawned) throw new Error(`Could not start ${input.codexPath}: ${spawned.message}`)
+    if (spawned) {
+      const where = input.host.remote ? ` on ${input.host.label}` : ""
+      throw new Error(`Could not start ${input.codexPath}${where}: ${spawned.message}`)
+    }
 
     const client = new AppServerClient(child, input.handlers)
     try {
@@ -152,16 +177,40 @@ export class AppServerClient {
 
   /** Closes stdin so the app-server shuts down cleanly; kills it if it does not exit in time. */
   async close(timeoutMs = 5_000): Promise<void> {
-    if (this.exited) return
-    const exited = new Promise<void>((resolve) => this.child.once("exit", () => resolve()))
-    this.child.stdin.end()
+    if (!this.exited) this.child.stdin.end()
     const timer = setTimeout(() => this.kill(), timeoutMs)
-    await exited
+    await this.exitHandled
     clearTimeout(timer)
   }
 
   kill(): void {
     if (!this.exited) this.child.kill("SIGTERM")
+  }
+
+  private stderrLine(line: string): void {
+    if (line.trim()) this.stderrTail.push(line.trim())
+    if (this.stderrTail.length > STDERR_TAIL_LINES) this.stderrTail.shift()
+    this.handlers.onStderr?.(line)
+  }
+
+  private async rejectPending(
+    code: number | null,
+    signal: NodeJS.Signals | null,
+    stderrEnded: Promise<void>,
+  ): Promise<void> {
+    // The exit code alone does not say why; the last stderr lines usually do (for example an SSH error). They can
+    // still be on their way when the process has exited, so wait for the rest of stderr, but only briefly.
+    let timer: ReturnType<typeof setTimeout> | undefined
+    await Promise.race([stderrEnded, new Promise<void>((resolve) => (timer = setTimeout(resolve, STDERR_DRAIN_MS)))])
+    clearTimeout(timer)
+    const lines = [...this.stderrTail, this.stderrPartial.trim()].filter(Boolean).slice(-STDERR_TAIL_LINES)
+    const tail = lines.length ? `: ${lines.join("\n")}` : ""
+    const error = new AppServerClosedError(`codex app-server exited (code ${code}, signal ${signal})${tail}`)
+    for (const pending of this.pending.values()) {
+      clearTimeout(pending.timer)
+      pending.reject(error)
+    }
+    this.pending.clear()
   }
 
   private write(message: unknown): void {

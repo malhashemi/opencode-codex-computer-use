@@ -1,21 +1,52 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { mkdtempSync, readFileSync, existsSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { delimiter, join } from "node:path"
 
+import { AppServerClient } from "../src/app-server"
 import { ComputerUseBridge, SetupError } from "../src/bridge"
+import { localHost, sshHost, type Host } from "../src/host"
 
 const FAKE_CODEX = join(import.meta.dir, "fixtures", "fake-codex")
+const FAKE_SSH_DIR = join(import.meta.dir, "fixtures", "fake-ssh")
+const PATH = process.env.PATH
 const bridges: ComputerUseBridge[] = []
 
 afterEach(async () => {
   await Promise.all(bridges.splice(0).map((bridge) => bridge.dispose()))
   delete process.env.FAKE_CODEX_NO_CUA
   delete process.env.FAKE_CODEX_POLICY
+  delete process.env.FAKE_SSH_HOME
+  delete process.env.FAKE_CODEX_INIT_ERROR_ONCE
+  process.env.PATH = PATH
+})
+
+describe("AppServerClient", () => {
+  test("tells its owner about an exit at once, while pending calls wait for the rest of stderr", async () => {
+    const at: Record<string, number> = {}
+    const client = await AppServerClient.start({
+      host: localHost(),
+      codexPath: FAKE_CODEX,
+      clientVersion: "test",
+      handlers: { onServerRequest: async () => ({}), onExit: () => (at.exit = performance.now()) },
+    })
+    const started = await client.request("thread/start", { ephemeral: true, cwd: "/tmp" })
+    await client
+      .request("mcpServer/tool/call", {
+        threadId: started.thread.id,
+        server: "cua_repl",
+        tool: "js",
+        arguments: { code: "EXIT_HELD" },
+      })
+      .catch(() => (at.rejected = performance.now()))
+    // EXIT_HELD leaves stderr open, so the rejection waits out the drain; the exit must not.
+    expect(at.rejected! - at.exit!).toBeGreaterThan(300)
+  })
 })
 
 function setup(
   input: {
+    host?: Host
     idleShutdownMs?: number
     codePrefix?: string
     onTraffic?: (direction: "send" | "receive", message: unknown) => void
@@ -25,6 +56,7 @@ function setup(
   process.env.FAKE_CODEX_LOG = logFile
   const logs: string[] = []
   const bridge = new ComputerUseBridge({
+    host: input.host ?? localHost(),
     codexPath: FAKE_CODEX,
     idleShutdownMs: input.idleShutdownMs ?? 0,
     callTimeoutMs: 10_000,
@@ -188,6 +220,49 @@ describe("ComputerUseBridge", () => {
     expect((await bridge.run("ses_a", "app")).notes).toEqual([])
   })
 
+  test("says why the app-server exited, from its last stderr lines", async () => {
+    const { bridge } = setup()
+    await expect(bridge.run("ses_a", "EXIT")).rejects.toThrow(
+      "codex app-server exited (code 1, signal null): fake-codex: stopping on request",
+    )
+  })
+
+  test("includes stderr output that arrives after the exit, even without a final newline", async () => {
+    const { bridge } = setup()
+    await expect(bridge.run("ses_a", "EXIT_LATE")).rejects.toThrow(
+      "codex app-server exited (code 1, signal null): fake-codex: late reason",
+    )
+  })
+
+  test("keeps an unfinished stderr line even when stderr stays open", async () => {
+    const { bridge } = setup()
+    await expect(bridge.run("ses_a", "EXIT_PARTIAL_HELD")).rejects.toThrow(
+      "codex app-server exited (code 1, signal null): fake-codex: unfinished reason",
+    )
+  })
+
+  test("a process from a failed startup never takes the place of the next one", async () => {
+    process.env.FAKE_CODEX_INIT_ERROR_ONCE = join(mkdtempSync(join(tmpdir(), "cua-init-")), "failed-once")
+    const { bridge, calls } = setup()
+    await expect(bridge.run("ses_a", "1 + 1")).rejects.toThrow("initialize failed")
+    expect(text(await bridge.run("ses_a", "2 + 2"))).toBe("ran on thread-1: 2 + 2")
+
+    // The first process exits a second after it was told to stop, long after the second one took over.
+    await Bun.sleep(1_500)
+    const again = await bridge.run("ses_a", "3 + 3")
+    expect(text(again)).toBe("ran on thread-1: 3 + 3")
+    expect(again.notes).toEqual([])
+    expect(calls("initialize")).toHaveLength(2)
+  })
+
+  test("does not wait for a leftover process that keeps stderr open", async () => {
+    const { bridge } = setup()
+    await bridge.run("ses_a", "warm up")
+    const started = performance.now()
+    await expect(bridge.run("ses_a", "EXIT_HELD")).rejects.toThrow("fake-codex: stopping, stderr stays open")
+    expect(performance.now() - started).toBeLessThan(1_500)
+  })
+
   test("cancelling a call rejects it and interrupts the turn", async () => {
     const { bridge, calls } = setup()
     await bridge.run("ses_a", "warm up")
@@ -206,6 +281,71 @@ describe("ComputerUseBridge", () => {
     const error = (await bridge.run("ses_a", "x").catch((caught: unknown) => caught)) as Error
     expect(error).toBeInstanceOf(SetupError)
     expect(error.message).toContain("no `cua_repl` MCP server")
+  })
+
+  test("runs Codex on a remote host, in that host's home folder", async () => {
+    const home = mkdtempSync(join(tmpdir(), "cu remote home "))
+    process.env.PATH = `${FAKE_SSH_DIR}${delimiter}${PATH}`
+    process.env.FAKE_SSH_HOME = home
+    const { bridge, calls, logs } = setup({ host: sshHost("my-mac") })
+
+    expect(await bridge.codexPath()).toBe(FAKE_CODEX)
+    expect(text(await bridge.run("ses_a", "1 + 1"))).toBe("ran on thread-1: 1 + 1")
+    expect(calls("thread/start")[0].params).toEqual({ ephemeral: true, cwd: home })
+    expect(await bridge.approvalPolicy()).toBeUndefined()
+    expect(calls("config/read")[0].params).toEqual({ cwd: home })
+    expect(logs.some((line) => line.endsWith(`from ${FAKE_CODEX} on my-mac over SSH`))).toBe(true)
+  })
+
+  test("a call names the remote host it cannot reach", async () => {
+    process.env.PATH = FAKE_SSH_DIR
+    const { bridge } = setup({ host: sshHost("my-mac") })
+    await expect(bridge.run("ses_a", "1 + 1")).rejects.toThrow(/^Could not reach my-mac over SSH: /)
+  })
+
+  test("does not start Codex when the plugin is unloaded while it looks for codex", async () => {
+    let lookedUp!: () => void
+    let release!: () => void
+    const lookingUp = new Promise<void>((resolve) => (lookedUp = resolve))
+    const released = new Promise<void>((resolve) => (release = resolve))
+    const local = localHost()
+    const host: Host = {
+      ...local,
+      findExecutable: async (candidates, name) => {
+        lookedUp()
+        await released
+        return local.findExecutable(candidates, name)
+      },
+    }
+    const { bridge, calls } = setup({ host })
+
+    const call = bridge.run("ses_a", "1 + 1")
+    await lookingUp
+    const disposed = bridge.dispose()
+    release()
+    await expect(call).rejects.toThrow("opencode-codex-computer-use has been unloaded")
+    await disposed
+    expect(calls("initialize")).toHaveLength(0)
+  })
+
+  test("closes an app-server that finished starting after the plugin was unloaded", async () => {
+    let disposed: Promise<void> | undefined
+    const local = localHost()
+    const host: Host = {
+      ...local,
+      // Unloads the plugin just as the app-server is being started.
+      command: (command, args) => {
+        disposed ??= bridge.dispose()
+        return local.command(command, args)
+      },
+    }
+    const { bridge, calls, logs } = setup({ host })
+
+    await expect(bridge.run("ses_a", "1 + 1")).rejects.toThrow("opencode-codex-computer-use has been unloaded")
+    await disposed
+    expect(calls("initialize")).toHaveLength(1)
+    expect(calls("thread/start")).toHaveLength(0)
+    expect(logs.some((line) => line.startsWith("codex app-server exited"))).toBe(true)
   })
 
   test("stops the app-server after the idle timeout", async () => {
