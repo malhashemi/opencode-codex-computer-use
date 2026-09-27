@@ -1,0 +1,10 @@
+#!/bin/sh
+# Stand-in for ssh in tests: runs the remote command on this machine through sh, the way sshd hands the joined
+# command string to the remote login shell, so the plugin's quoting is exercised for real.
+# $FAKE_SSH_HOME plays the remote home directory.
+while [ "$#" -gt 0 ] && [ "$1" != "--" ]; do shift; done
+shift 2 # "--" and the destination
+command="$*"
+HOME="${FAKE_SSH_HOME:-$HOME}"
+export HOME
+exec sh -c "$command"

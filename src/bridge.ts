@@ -1,13 +1,18 @@
 import { AppServerClient, AppServerError } from "./app-server"
 import { BUNDLED_CODEX_PATHS, CODEX_PATH_ENV, resolveCodexPath } from "./codex-path"
+import type { Host } from "./host"
 
 /** Codex's MCP server that hosts the Computer Use JavaScript runtime (`cua`). */
 export const CUA_SERVER = "cua_repl"
 
 export interface BridgeOptions {
+  /** The machine that runs Codex. */
+  host: Host
+  /** Path to `codex` on the host. */
   codexPath?: string
   idleShutdownMs: number
   callTimeoutMs: number
+  /** The OpenCode location directory; Codex's working folder when Codex runs on this machine. */
   cwd: string
   version: string
   log: (message: string) => void
@@ -55,6 +60,7 @@ interface SessionState {
 }
 
 export class ComputerUseBridge {
+  readonly host: Host
   private client?: AppServerClient
   private starting?: Promise<AppServerClient>
   private generation = 0
@@ -65,7 +71,9 @@ export class ComputerUseBridge {
   private idleTimer?: ReturnType<typeof setTimeout>
   private disposed = false
 
-  constructor(private readonly options: BridgeOptions) {}
+  constructor(private readonly options: BridgeOptions) {
+    this.host = options.host
+  }
 
   async run(
     sessionID: string,
@@ -200,15 +208,17 @@ export class ComputerUseBridge {
   async approvalPolicy(): Promise<string | undefined> {
     return this.busy(async () => {
       const client = await this.ensureClient()
-      const response = await client.request("config/read", { cwd: this.options.cwd }, { timeoutMs: 15_000 })
+      const cwd = await this.workingDirectory()
+      const response = await client.request("config/read", { cwd }, { timeoutMs: 15_000 })
       const policy = response?.config?.approval_policy
       if (typeof policy === "string") return policy
       return policy && typeof policy === "object" ? "granular" : undefined
     })
   }
 
-  get codexPath(): string | undefined {
-    return resolveCodexPath(this.options.codexPath)
+  /** Where `codex` is on the host, or undefined when it is not installed there. */
+  codexPath(): Promise<string | undefined> {
+    return resolveCodexPath(this.host, this.options.codexPath)
   }
 
   async dispose(): Promise<void> {
@@ -252,15 +262,17 @@ export class ComputerUseBridge {
     if (this.starting) return this.starting
 
     this.starting = (async () => {
-      const codexPath = resolveCodexPath(this.options.codexPath)
+      const codexPath = await this.codexPath()
+      const where = this.host.remote ? ` on ${this.host.label}` : ""
       if (!codexPath) {
         throw new SetupError(
-          `Could not find the \`codex\` executable (looked at the \`codexPath\` option, $${CODEX_PATH_ENV}, ` +
-            `${[...BUNDLED_CODEX_PATHS, "PATH"].join(", ")}). ${SETUP_HELP}`,
+          `Could not find the \`codex\` executable${where} (looked at the \`codexPath\` option, ` +
+            `$${CODEX_PATH_ENV}, ${[...BUNDLED_CODEX_PATHS, "PATH"].join(", ")}). ${SETUP_HELP}`,
         )
       }
       const generation = this.generation + 1
       const client = await AppServerClient.start({
+        host: this.host,
         codexPath,
         clientVersion: this.options.version,
         handlers: {
@@ -271,7 +283,7 @@ export class ComputerUseBridge {
       })
       this.generation = generation
       this.client = client
-      this.options.log(`started codex app-server (pid ${client.pid}) from ${codexPath}`)
+      this.options.log(`started codex app-server (pid ${client.pid}) from ${codexPath}${where}`)
       return client
     })().finally(() => {
       this.starting = undefined
@@ -296,13 +308,14 @@ export class ComputerUseBridge {
     const existing = this.sessions.get(sessionID)
     if (existing && existing.generation === this.generation) return existing.threadID
 
-    // No approvalPolicy: app access follows the user's Codex approval_policy.
-    const params: Record<string, unknown> = { ephemeral: true, cwd: this.options.cwd }
-    const threadID = client.request("thread/start", params, { timeoutMs: 60_000 }).then((response: any) => {
-      const id = response?.thread?.id
-      if (typeof id !== "string") throw new Error("thread/start returned no thread id")
-      return id
-    })
+    const threadID = this.workingDirectory()
+      // No approvalPolicy: app access follows the user's Codex approval_policy.
+      .then((cwd) => client.request("thread/start", { ephemeral: true, cwd }, { timeoutMs: 60_000 }))
+      .then((response: any) => {
+        const id = response?.thread?.id
+        if (typeof id !== "string") throw new Error("thread/start returned no thread id")
+        return id
+      })
     const state: SessionState = { generation: this.generation, threadID, dirty: false }
     this.sessions.set(sessionID, state)
     void (async () => {
@@ -313,6 +326,11 @@ export class ComputerUseBridge {
       }
     })()
     return threadID
+  }
+
+  /** Codex's working folder must exist on the machine that runs it; its MCP servers fail to start otherwise. */
+  private async workingDirectory(): Promise<string> {
+    return this.host.remote ? (await this.host.info()).home : this.options.cwd
   }
 
   private async answerServerRequest(method: string, params: any): Promise<unknown> {

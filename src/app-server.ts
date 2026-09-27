@@ -1,7 +1,12 @@
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process"
+import type { ChildProcessWithoutNullStreams } from "node:child_process"
 import { createInterface } from "node:readline"
 
+import { spawnOnHost, type Host } from "./host"
+
 type RequestID = number | string
+
+/** Non-empty stderr lines kept for the error raised when the app-server exits. */
+const STDERR_TAIL_LINES = 3
 
 interface Pending {
   method: string
@@ -51,6 +56,7 @@ export interface RequestOptions {
 export class AppServerClient {
   private nextID = 1
   private readonly pending = new Map<RequestID, Pending>()
+  private readonly stderrTail: string[] = []
   private exited = false
 
   private constructor(
@@ -58,10 +64,16 @@ export class AppServerClient {
     private readonly handlers: AppServerHandlers,
   ) {
     createInterface({ input: child.stdout }).on("line", (line) => this.receive(line))
-    createInterface({ input: child.stderr }).on("line", (line) => handlers.onStderr?.(line))
+    createInterface({ input: child.stderr }).on("line", (line) => {
+      if (line.trim()) this.stderrTail.push(line.trim())
+      if (this.stderrTail.length > STDERR_TAIL_LINES) this.stderrTail.shift()
+      handlers.onStderr?.(line)
+    })
     child.on("exit", (code, signal) => {
       this.exited = true
-      const error = new AppServerClosedError(`codex app-server exited (code ${code}, signal ${signal})`)
+      // The exit code alone does not say why; the last stderr lines usually do (for example an SSH error).
+      const tail = this.stderrTail.length ? `: ${this.stderrTail.join("\n")}` : ""
+      const error = new AppServerClosedError(`codex app-server exited (code ${code}, signal ${signal})${tail}`)
       for (const pending of this.pending.values()) {
         clearTimeout(pending.timer)
         pending.reject(error)
@@ -73,20 +85,21 @@ export class AppServerClient {
   }
 
   static async start(input: {
+    host: Host
     codexPath: string
     clientVersion: string
     handlers: AppServerHandlers
     timeoutMs?: number
   }): Promise<AppServerClient> {
-    const child = spawn(input.codexPath, ["app-server", "--listen", "stdio://"], {
-      stdio: ["pipe", "pipe", "pipe"],
-      env: process.env,
-    })
+    const child = spawnOnHost(input.host, input.codexPath, ["app-server", "--listen", "stdio://"])
     const spawned = await new Promise<Error | undefined>((resolve) => {
       child.once("spawn", () => resolve(undefined))
       child.once("error", (error) => resolve(error))
     })
-    if (spawned) throw new Error(`Could not start ${input.codexPath}: ${spawned.message}`)
+    if (spawned) {
+      const where = input.host.remote ? ` on ${input.host.label}` : ""
+      throw new Error(`Could not start ${input.codexPath}${where}: ${spawned.message}`)
+    }
 
     const client = new AppServerClient(child, input.handlers)
     try {

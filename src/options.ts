@@ -11,6 +11,8 @@ export type Surface = (typeof SURFACES)[number]
 
 export interface Options {
   codexPath?: string
+  /** SSH destination of the machine that runs Codex Computer Use; undefined runs it on this machine. */
+  ssh?: string
   idleShutdownMs: number
   callTimeoutMs: number
   /** Maximum text returned by one call, in bytes. 0 disables the limit. */
@@ -39,6 +41,7 @@ export function parseOptions(raw: PluginOptions): Options {
   }
   return {
     codexPath: typeof raw.codexPath === "string" && raw.codexPath.trim() ? raw.codexPath.trim() : undefined,
+    ssh: sshDestination(raw.ssh),
     idleShutdownMs: nonNegative(raw.idleShutdownMinutes, 0) * 60_000,
     callTimeoutMs: positive(raw.callTimeoutSeconds, 300) * 1_000,
     maxOutputBytes: Math.round(nonNegative(raw.maxOutputKB, 128) * 1024),
@@ -73,6 +76,18 @@ function surfaces(value: unknown): readonly Surface[] {
     )
   }
   return SURFACES.filter((surface) => list.includes(surface))
+}
+
+// SSH settings belong in ~/.ssh/config, so a value that looks like an ssh option or holds several words is a mistake.
+function sshDestination(value: unknown): string | undefined {
+  if (typeof value !== "string" || !value.trim()) return undefined
+  const destination = value.trim()
+  if (destination.startsWith("-") || /\s/.test(destination)) {
+    throw new Error(
+      `[codex-computer-use] invalid option ssh=${JSON.stringify(value)}; use an SSH destination such as "my-mac" or "me@my-mac"`,
+    )
+  }
+  return destination
 }
 
 function debugLog(value: unknown): string | undefined {

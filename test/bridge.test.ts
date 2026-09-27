@@ -1,21 +1,27 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { mkdtempSync, readFileSync, existsSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { delimiter, join } from "node:path"
 
 import { ComputerUseBridge, SetupError } from "../src/bridge"
+import { localHost, sshHost, type Host } from "../src/host"
 
 const FAKE_CODEX = join(import.meta.dir, "fixtures", "fake-codex")
+const FAKE_SSH_DIR = join(import.meta.dir, "fixtures", "fake-ssh")
+const PATH = process.env.PATH
 const bridges: ComputerUseBridge[] = []
 
 afterEach(async () => {
   await Promise.all(bridges.splice(0).map((bridge) => bridge.dispose()))
   delete process.env.FAKE_CODEX_NO_CUA
   delete process.env.FAKE_CODEX_POLICY
+  delete process.env.FAKE_SSH_HOME
+  process.env.PATH = PATH
 })
 
 function setup(
   input: {
+    host?: Host
     idleShutdownMs?: number
     codePrefix?: string
     onTraffic?: (direction: "send" | "receive", message: unknown) => void
@@ -25,6 +31,7 @@ function setup(
   process.env.FAKE_CODEX_LOG = logFile
   const logs: string[] = []
   const bridge = new ComputerUseBridge({
+    host: input.host ?? localHost(),
     codexPath: FAKE_CODEX,
     idleShutdownMs: input.idleShutdownMs ?? 0,
     callTimeoutMs: 10_000,
@@ -188,6 +195,13 @@ describe("ComputerUseBridge", () => {
     expect((await bridge.run("ses_a", "app")).notes).toEqual([])
   })
 
+  test("says why the app-server exited, from its last stderr lines", async () => {
+    const { bridge } = setup()
+    await expect(bridge.run("ses_a", "EXIT")).rejects.toThrow(
+      "codex app-server exited (code 1, signal null): fake-codex: stopping on request",
+    )
+  })
+
   test("cancelling a call rejects it and interrupts the turn", async () => {
     const { bridge, calls } = setup()
     await bridge.run("ses_a", "warm up")
@@ -206,6 +220,20 @@ describe("ComputerUseBridge", () => {
     const error = (await bridge.run("ses_a", "x").catch((caught: unknown) => caught)) as Error
     expect(error).toBeInstanceOf(SetupError)
     expect(error.message).toContain("no `cua_repl` MCP server")
+  })
+
+  test("runs Codex on a remote host, in that host's home folder", async () => {
+    const home = mkdtempSync(join(tmpdir(), "cu remote home "))
+    process.env.PATH = `${FAKE_SSH_DIR}${delimiter}${PATH}`
+    process.env.FAKE_SSH_HOME = home
+    const { bridge, calls, logs } = setup({ host: sshHost("my-mac") })
+
+    expect(await bridge.codexPath()).toBe(FAKE_CODEX)
+    expect(text(await bridge.run("ses_a", "1 + 1"))).toBe("ran on thread-1: 1 + 1")
+    expect(calls("thread/start")[0].params).toEqual({ ephemeral: true, cwd: home })
+    expect(await bridge.approvalPolicy()).toBeUndefined()
+    expect(calls("config/read")[0].params).toEqual({ cwd: home })
+    expect(logs.some((line) => line.endsWith(`from ${FAKE_CODEX} on my-mac over SSH`))).toBe(true)
   })
 
   test("stops the app-server after the idle timeout", async () => {

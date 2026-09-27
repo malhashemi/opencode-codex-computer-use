@@ -1,5 +1,5 @@
 import type { McpContentBlock } from "./bridge"
-import { formatOcr, recognizeText, type OcrResult } from "./ocr"
+import { formatOcr, type OcrResult } from "./ocr"
 import type { ScreenshotMode } from "./options"
 
 export type ToolContent =
@@ -10,6 +10,7 @@ export interface ContentOptions {
   screenshots?: ScreenshotMode
   /** Maximum bytes of text across all blocks; 0 or undefined disables the limit. Notes are never cut. */
   maxOutputBytes?: number
+  /** Text recognition for `ocr` and `both`; it runs where Computer Use runs, so the caller provides it. */
   ocr?: (image: Uint8Array) => Promise<OcrResult>
 }
 
@@ -40,7 +41,7 @@ export async function toToolContent(
   options: ContentOptions = {},
 ): Promise<ToolContent[]> {
   const mode = options.screenshots ?? "image"
-  const ocr = options.ocr ?? recognizeText
+  const ocr = options.ocr
   let images = 0
   const pending = blocks.map(async (block): Promise<ToolContent[]> => {
     if (block.type === "text" && typeof block.text === "string") return [{ type: "text", text: block.text }]
@@ -60,6 +61,7 @@ export async function toToolContent(
     }
     if (mode === "ocr" || mode === "both") {
       try {
+        if (!ocr) throw new Error("no text recognizer is available")
         items.push({ type: "text", text: formatOcr(await ocr(Buffer.from(block.data, "base64")), index) })
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error)

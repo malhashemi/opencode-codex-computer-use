@@ -1,7 +1,4 @@
-import { execFile } from "node:child_process"
-import { mkdtemp, rm, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { runOnHost, type Host } from "./host"
 
 export interface OcrLine {
   text: string
@@ -16,11 +13,13 @@ export interface OcrResult {
   lines: OcrLine[]
 }
 
-// On-device text recognition with macOS's Vision framework, run through JavaScript for Automation.
-const SCRIPT = `
-ObjC.import("Vision"); ObjC.import("AppKit");
-function run(argv) {
-  const image = $.NSImage.alloc.initWithContentsOfURL($.NSURL.fileURLWithPath(argv[0]));
+// On-device text recognition with macOS's Vision framework, run through JavaScript for Automation. The image
+// arrives on stdin, so the same command works on this machine and over SSH without temporary files; osascript
+// prints the JSON the script returns.
+const SCRIPT = `ObjC.import("Vision"); ObjC.import("AppKit");
+(() => {
+  const data = $.NSFileHandle.fileHandleWithStandardInput.readDataToEndOfFile;
+  const image = $.NSImage.alloc.initWithData(data);
   const cg = image.CGImageForProposedRectContextHints(null, $(), $());
   const w = Number($.CGImageGetWidth(cg)), h = Number($.CGImageGetHeight(cg));
   const request = $.VNRecognizeTextRequest.alloc.init;
@@ -39,29 +38,19 @@ function run(argv) {
     });
   }
   return JSON.stringify({ width: w, height: h, lines });
-}`
+})()`
 
-export async function recognizeText(image: Uint8Array, timeoutMs = 30_000): Promise<OcrResult> {
-  if (process.platform !== "darwin") {
-    throw new Error("on-device OCR is currently only available on macOS; use the accessibility tree")
+/** Recognizes the text in a screenshot on the machine that runs Computer Use. */
+export async function recognizeText(host: Host, image: Uint8Array, timeoutMs = 30_000): Promise<OcrResult> {
+  if ((await host.info()).platform !== "darwin") {
+    throw new Error("on-device OCR needs macOS on the Computer Use machine; use the accessibility tree")
   }
-  const directory = await mkdtemp(join(tmpdir(), "codex-cu-ocr-"))
-  try {
-    const imagePath = join(directory, "screenshot")
-    const scriptPath = join(directory, "ocr.js")
-    await Promise.all([writeFile(imagePath, image), writeFile(scriptPath, SCRIPT)])
-    const stdout = await new Promise<string>((resolve, reject) =>
-      execFile(
-        "/usr/bin/osascript",
-        ["-l", "JavaScript", scriptPath, imagePath],
-        { timeout: timeoutMs, maxBuffer: 16 * 1024 * 1024 },
-        (error, out, stderr) => (error ? reject(new Error(stderr.trim() || error.message)) : resolve(out)),
-      ),
-    )
-    return JSON.parse(stdout) as OcrResult
-  } finally {
-    await rm(directory, { recursive: true, force: true })
-  }
+  const stdout = await runOnHost(host, "/usr/bin/osascript", ["-l", "JavaScript", "-e", SCRIPT], {
+    input: image,
+    timeoutMs,
+    maxBuffer: 16 * 1024 * 1024,
+  })
+  return JSON.parse(stdout) as OcrResult
 }
 
 /** Reading order: top to bottom, then left to right within roughly the same row. */

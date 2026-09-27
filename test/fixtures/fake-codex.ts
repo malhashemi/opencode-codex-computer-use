@@ -55,7 +55,10 @@ async function toolCall(id: number, params: any) {
   }
   if (params.tool !== "js") return send({ id, result: { content: [{ type: "text", text: "{}" }] } })
   const code: string = params.arguments.code
-  if (code.includes("EXIT")) process.exit(1)
+  if (code.includes("EXIT")) {
+    process.stderr.write("fake-codex: stopping on request\n", () => process.exit(1))
+    return
+  }
   if (code.includes("BROWSER")) {
     const meta = params._meta?.["x-codex-turn-metadata"]
     if (!meta?.session_id || !meta?.turn_id) {

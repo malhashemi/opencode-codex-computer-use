@@ -2,8 +2,10 @@ import { describe, expect, test } from "bun:test"
 import { homedir } from "node:os"
 import { join } from "node:path"
 
+import { ComputerUseBridge } from "../src/bridge"
 import { stripImages } from "../src/debug"
-import { approvalCheck } from "../src/doctor"
+import { approvalCheck, runDoctor } from "../src/doctor"
+import { sshHost, type Host } from "../src/host"
 import { describeTool } from "../src/index"
 import { DEFAULT_DEBUG_LOG, parseOptions } from "../src/options"
 import { surfaceGuard } from "../src/surfaces"
@@ -12,6 +14,7 @@ describe("parseOptions", () => {
   test("defaults", () => {
     expect(parseOptions({})).toEqual({
       codexPath: undefined,
+      ssh: undefined,
       idleShutdownMs: 0,
       callTimeoutMs: 300_000,
       maxOutputBytes: 128 * 1024,
@@ -26,6 +29,7 @@ describe("parseOptions", () => {
     expect(
       parseOptions({
         codexPath: " /x/codex ",
+        ssh: " me@my-mac ",
         idleShutdownMinutes: 30,
         callTimeoutSeconds: 60,
         maxOutputKB: 0,
@@ -35,6 +39,7 @@ describe("parseOptions", () => {
       }),
     ).toEqual({
       codexPath: "/x/codex",
+      ssh: "me@my-mac",
       idleShutdownMs: 1_800_000,
       callTimeoutMs: 60_000,
       maxOutputBytes: 0,
@@ -52,6 +57,15 @@ describe("parseOptions", () => {
     expect(() => parseOptions({ surfaces: [] })).toThrow("invalid option surfaces")
     expect(() => parseOptions({ surfaces: ["apps", "files"] })).toThrow("invalid option surfaces")
   })
+
+  test("ssh takes one SSH destination", () => {
+    expect(parseOptions({ ssh: "my-mac" }).ssh).toBe("my-mac")
+    expect(parseOptions({ ssh: "  " }).ssh).toBeUndefined()
+    expect(() => parseOptions({ ssh: "-oProxyCommand=sh" })).toThrow(
+      '[codex-computer-use] invalid option ssh="-oProxyCommand=sh"; use an SSH destination such as "my-mac" or "me@my-mac"',
+    )
+    expect(() => parseOptions({ ssh: "me@my-mac -p 2222" })).toThrow('invalid option ssh="me@my-mac -p 2222"')
+  })
 })
 
 test("the removed approvals option is ignored with a warning", () => {
@@ -65,6 +79,62 @@ describe("approvalCheck", () => {
     expect(approvalCheck("never")[0]).toBe("ok")
     expect(approvalCheck("on-request")).toEqual(["warn", expect.stringContaining('approval_policy = "on-request"')])
     expect(approvalCheck(undefined)[1]).toContain("approval_policy unknown")
+  })
+})
+
+function doctor(host: Host) {
+  const bridge = new ComputerUseBridge({
+    host,
+    idleShutdownMs: 0,
+    callTimeoutMs: 1_000,
+    cwd: "/",
+    version: "test",
+    log: () => {},
+  })
+  return runDoctor(bridge, parseOptions({ ssh: "my-mac" }), "doctor")
+}
+
+describe("runDoctor", () => {
+  test("names the Computer Use machine when it cannot be reached", async () => {
+    const host: Host = {
+      ...sshHost("my-mac"),
+      info: async () => {
+        throw new Error("ssh: Could not resolve hostname my-mac")
+      },
+    }
+    const report = await doctor(host)
+    expect(report.ok).toBe(false)
+    expect(report.checks).toEqual([
+      {
+        name: "Platform",
+        status: "fail",
+        detail: "Could not reach my-mac over SSH: ssh: Could not resolve hostname my-mac",
+      },
+    ])
+  })
+
+  test("checks the platform and codex on the Computer Use machine", async () => {
+    const searched: (string | undefined)[][] = []
+    const host: Host = {
+      ...sshHost("my-mac"),
+      info: async () => ({
+        platform: "darwin",
+        arch: "arm64",
+        home: "/Users/me",
+        codexHome: "/Users/me/.codex",
+        osVersion: "26.1",
+      }),
+      findExecutable: async (candidates) => {
+        searched.push([...candidates])
+        return undefined
+      },
+    }
+    const report = await doctor(host)
+    expect(report.checks).toEqual([
+      { name: "Platform", status: "ok", detail: "macOS 26.1 (arm64) on my-mac over SSH" },
+      { name: "codex executable", status: "fail", detail: expect.stringMatching(/^Not found on my-mac over SSH\. /) },
+    ])
+    expect(searched[0]).toContain("/Applications/ChatGPT.app/Contents/Resources/codex")
   })
 })
 
@@ -107,6 +177,13 @@ describe("describeTool", () => {
     expect(appsOnly).toContain("Browser tabs are turned off")
     expect(appsOnly).toContain("recognized text")
     expect(describeTool(parseOptions({}))).toContain("native desktop apps and Chrome tabs")
+  })
+
+  test("says when the apps and tabs are on another machine", () => {
+    expect(describeTool(parseOptions({}))).not.toContain("SSH")
+    const remote = describeTool(parseOptions({ ssh: "my-mac" }))
+    expect(remote).toContain("are on my-mac (reached over SSH), a different machine")
+    expect(remote).toContain("local files are not visible there until copied")
   })
 })
 
