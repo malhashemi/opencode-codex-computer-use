@@ -4,7 +4,7 @@ import { CUA_SERVER, type ComputerUseBridge, type McpContentBlock } from "./brid
 import { imageMime, textOf } from "./content"
 import { runOnHost, type Host, type HostInfo } from "./host"
 import { recognizeText } from "./ocr"
-import type { Options } from "./options"
+import type { AppAccess, Options } from "./options"
 
 type Status = "ok" | "warn" | "fail" | "skip"
 
@@ -74,20 +74,38 @@ export async function runDoctor(
       return report(checks, options)
     }
     add("Computer Use runtime", "ok", `Codex app-server running with \`${CUA_SERVER}\``)
-    add("App access", ...approvalCheck(await bridge.approvalPolicy().catch(() => undefined)))
+    add("App access", ...approvalCheck(await bridge.approvalPolicy().catch(() => undefined), options.appAccess))
 
     const probe = (code: string) => bridge.run(sessionKey, code)
 
     if (options.surfaces.includes("apps")) {
-      const apps = await probe('nodeRepl.write("APPS=" + (await cua.listApps({ emit: false })).length);')
-      const count = textOf(apps.content).match(/APPS=(\d+)/)?.[1]
-      add(
-        "Native apps",
-        count ? "ok" : "fail",
-        count ? `Engine reachable, ${count} apps listed` : firstLine(apps.content, "Could not list apps"),
-      )
+      // `cua.listApps` can hang in some Codex builds on macOS, so check that one app can be attached to instead.
+      // Other platforms need an open window to bind an app, so keep the inventory check there.
+      let ready = false
+      if (info.platform === "darwin") {
+        const apps = await probe('await cua.getApp("com.apple.finder"); nodeRepl.write("APPS=1");')
+        const output = textOf(apps.content)
+        ready = /APPS=1/.test(output)
+        if (ready) {
+          add("Native apps", "ok", "Engine reachable (Finder attached)")
+        } else if (/not approved/i.test(output)) {
+          // The engine works; the App access check already explains how to allow apps.
+          add("Native apps", "warn", "Engine reachable, but Finder is not approved (see App access)")
+        } else {
+          add("Native apps", "fail", firstLine(apps.content, "Could not attach to Finder"))
+        }
+      } else {
+        const apps = await probe('nodeRepl.write("APPS=" + (await cua.listApps({ emit: false })).length);')
+        const count = textOf(apps.content).match(/APPS=(\d+)/)?.[1]
+        ready = Boolean(count)
+        add(
+          "Native apps",
+          ready ? "ok" : "fail",
+          ready ? `Engine reachable, ${count} apps listed` : firstLine(apps.content, "Could not list apps"),
+        )
+      }
 
-      if (info.platform === "darwin" && count) {
+      if (info.platform === "darwin" && ready) {
         const shot = await probe(
           'const __doctorFinder = await cua.getApp("com.apple.finder"); await __doctorFinder.getScreenshot({ emit: true }); nodeRepl.write("SHOT");',
         ).catch((error: unknown) => ({
@@ -144,19 +162,24 @@ function report(checks: Check[], options: Options): DoctorReport {
     ...checks.map((check) => `- ${ICONS[check.status]} **${check.name}**: ${check.detail}`),
     "",
     `Options: surfaces=${options.surfaces.join("+")}, screenshots=${options.screenshots}, ` +
+      `appAccess=${options.appAccess}, ` +
       `maxOutputKB=${Math.round(options.maxOutputBytes / 1024) || "unlimited"}, ` +
       `idleShutdownMinutes=${options.idleShutdownMs / 60_000 || "never"}, debug=${options.debugLog ?? "off"}`,
   ]
   return { ok, checks, text: lines.join("\n") }
 }
 
-export function approvalCheck(policy: string | undefined): [Status, string] {
+export function approvalCheck(policy: string | undefined, appAccess: AppAccess = "decline"): [Status, string] {
+  if (appAccess === "accept") {
+    return ["ok", 'Computer Use app-access prompts are accepted automatically (appAccess = "accept")']
+  }
   if (policy === "never") return ["ok", 'Codex approves app access itself (approval_policy = "never")']
   const setting = policy ? `approval_policy = "${policy}"` : "approval_policy unknown"
   return [
     "warn",
     `${setting}: apps you have not approved permanently in ChatGPT/Codex will be declined, because OpenCode cannot ` +
-      'show Computer Use\'s approval prompts yet. Approve apps once in ChatGPT/Codex, or set approval_policy = "never".',
+      'show Computer Use\'s approval prompts yet. Approve apps once in ChatGPT/Codex, set approval_policy = "never", ' +
+      'or set the appAccess option to "accept".',
   ]
 }
 
