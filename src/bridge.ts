@@ -1,6 +1,7 @@
 import { AppServerClient, AppServerError } from "./app-server"
 import { BUNDLED_CODEX_PATHS, CODEX_PATH_ENV, resolveCodexPath } from "./codex-path"
 import type { Host } from "./host"
+import type { AppAccess } from "./options"
 
 /** Codex's MCP server that hosts the Computer Use JavaScript runtime (`cua`). */
 export const CUA_SERVER = "cua_repl"
@@ -12,6 +13,8 @@ export interface BridgeOptions {
   codexPath?: string
   idleShutdownMs: number
   callTimeoutMs: number
+  /** How to answer Codex's app-access prompts (see the `appAccess` option). */
+  appAccess: AppAccess
   /** The OpenCode location directory; Codex's working folder when Codex runs on this machine. */
   cwd: string
   version: string
@@ -108,7 +111,11 @@ export class ComputerUseBridge {
             threadId: threadID,
             server: CUA_SERVER,
             tool: "js",
-            arguments: { code: this.options.codePrefix ? `${this.options.codePrefix}\n${code}` : code },
+            arguments: {
+              code: this.options.codePrefix ? `${this.options.codePrefix}\n${code}` : code,
+              // The runtime defaults to 30s, too short for large accessibility trees; keep both timeouts in step.
+              timeout_ms: this.options.callTimeoutMs,
+            },
             _meta: turnMetadata(threadID, state?.turnID, input.callID),
           },
           { signal: input.signal, timeoutMs: this.options.callTimeoutMs },
@@ -347,9 +354,14 @@ export class ComputerUseBridge {
     if (method !== "mcpServer/elicitation/request") {
       throw new Error(`${method} is not supported by opencode-codex-computer-use`)
     }
+    const message = typeof params?.message === "string" ? params.message : "Computer Use requested approval"
+    if (this.options.appAccess === "accept") {
+      // Opt-in: treat every forwarded app-access prompt as approved and ask Codex to remember the app.
+      this.options.log(`accepted: ${message}`)
+      return { action: "accept", content: null, _meta: { persist: "always" } }
+    }
     // OpenCode's plugin API cannot raise a permission question yet, so a prompt Codex forwards
     // (because approval_policy is not "never") is declined, and the model is told how the user can allow the app.
-    const message = typeof params?.message === "string" ? params.message : "Computer Use requested approval"
     this.addApprovalNote(params?.threadId, declinedNote(message, appName(params)))
     this.options.log(`declined: ${message}`)
     return { action: "decline", content: null }

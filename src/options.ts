@@ -9,6 +9,9 @@ export type ScreenshotMode = (typeof SCREENSHOT_MODES)[number]
 export const SURFACES = ["apps", "browser"] as const
 export type Surface = (typeof SURFACES)[number]
 
+export const APP_ACCESS = ["decline", "accept"] as const
+export type AppAccess = (typeof APP_ACCESS)[number]
+
 export interface Options {
   codexPath?: string
   /** SSH destination of the machine that runs Codex Computer Use; undefined runs it on this machine. */
@@ -19,6 +22,8 @@ export interface Options {
   maxOutputBytes: number
   screenshots: ScreenshotMode
   surfaces: readonly Surface[]
+  /** How to answer Codex's per-app access prompts. */
+  appAccess: AppAccess
   /** JSONL file receiving the app-server traffic, or undefined when debugging is off. */
   debugLog?: string
   /** Messages about options that were accepted but have no effect. */
@@ -47,6 +52,7 @@ export function parseOptions(raw: PluginOptions): Options {
     maxOutputBytes: Math.round(nonNegative(raw.maxOutputKB, 128) * 1024),
     screenshots: oneOf("screenshots", raw.screenshots, SCREENSHOT_MODES, "image"),
     surfaces: surfaces(raw.surfaces),
+    appAccess: oneOf("appAccess", raw.appAccess, APP_ACCESS, "decline"),
     debugLog: debugLog(raw.debug),
     warnings,
   }

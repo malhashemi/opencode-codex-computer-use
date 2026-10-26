@@ -20,6 +20,7 @@ describe("parseOptions", () => {
       maxOutputBytes: 128 * 1024,
       screenshots: "image",
       surfaces: ["apps", "browser"],
+      appAccess: "decline",
       debugLog: undefined,
       warnings: [],
     })
@@ -35,6 +36,7 @@ describe("parseOptions", () => {
         maxOutputKB: 0,
         screenshots: "ocr",
         surfaces: ["browser"],
+        appAccess: "accept",
         debug: "~/cu.jsonl",
       }),
     ).toEqual({
@@ -45,6 +47,7 @@ describe("parseOptions", () => {
       maxOutputBytes: 0,
       screenshots: "ocr",
       surfaces: ["browser"],
+      appAccess: "accept",
       debugLog: join(homedir(), "cu.jsonl"),
       warnings: [],
     })
@@ -56,6 +59,7 @@ describe("parseOptions", () => {
     expect(() => parseOptions({ screenshots: "video" })).toThrow("invalid option screenshots")
     expect(() => parseOptions({ surfaces: [] })).toThrow("invalid option surfaces")
     expect(() => parseOptions({ surfaces: ["apps", "files"] })).toThrow("invalid option surfaces")
+    expect(() => parseOptions({ appAccess: "ask" })).toThrow('invalid option appAccess="ask"; use decline, accept')
   })
 
   test("ssh takes one SSH destination", () => {
@@ -75,10 +79,18 @@ test("the removed approvals option is ignored with a warning", () => {
 })
 
 describe("approvalCheck", () => {
-  test("only never is fully automatic", () => {
+  test("only never is fully automatic by default", () => {
     expect(approvalCheck("never")[0]).toBe("ok")
     expect(approvalCheck("on-request")).toEqual(["warn", expect.stringContaining('approval_policy = "on-request"')])
     expect(approvalCheck(undefined)[1]).toContain("approval_policy unknown")
+  })
+
+  test("reports the appAccess option", () => {
+    expect(approvalCheck("on-request", "accept")).toEqual([
+      "ok",
+      'Computer Use app-access prompts are accepted automatically (appAccess = "accept")',
+    ])
+    expect(approvalCheck(undefined)[1]).toContain('appAccess option to "accept"')
   })
 })
 
@@ -89,6 +101,7 @@ function doctor(host: Host) {
     callTimeoutMs: 1_000,
     cwd: "/",
     version: "test",
+    appAccess: "decline",
     log: () => {},
   })
   return runDoctor(bridge, parseOptions({ ssh: "my-mac" }), "doctor")

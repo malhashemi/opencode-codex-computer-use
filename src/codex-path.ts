@@ -3,6 +3,7 @@ import type { Host } from "./host"
 /** macOS app bundles first: their `codex` matches the Computer Use runtime shipped in the same bundle. */
 export const BUNDLED_CODEX_PATHS: readonly string[] = [
   "/Applications/ChatGPT.app/Contents/Resources/codex",
+  "/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex",
   "/Applications/Codex.app/Contents/Resources/codex",
 ]
 

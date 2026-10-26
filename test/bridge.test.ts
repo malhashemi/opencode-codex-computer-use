@@ -6,6 +6,7 @@ import { delimiter, join } from "node:path"
 import { AppServerClient } from "../src/app-server"
 import { ComputerUseBridge, SetupError } from "../src/bridge"
 import { localHost, sshHost, type Host } from "../src/host"
+import type { AppAccess } from "../src/options"
 
 const FAKE_CODEX = join(import.meta.dir, "fixtures", "fake-codex")
 const FAKE_SSH_DIR = join(import.meta.dir, "fixtures", "fake-ssh")
@@ -49,6 +50,7 @@ function setup(
     host?: Host
     idleShutdownMs?: number
     codePrefix?: string
+    appAccess?: AppAccess
     onTraffic?: (direction: "send" | "receive", message: unknown) => void
   } = {},
 ) {
@@ -62,6 +64,7 @@ function setup(
     callTimeoutMs: 10_000,
     cwd: "/tmp/project",
     version: "test",
+    appAccess: input.appAccess ?? "decline",
     log: (message) => logs.push(message),
     codePrefix: input.codePrefix,
     onTraffic: input.onTraffic,
@@ -95,6 +98,7 @@ describe("ComputerUseBridge", () => {
     expect(starts).toHaveLength(2)
     expect(starts[0].params).toEqual({ ephemeral: true, cwd: "/tmp/project" })
     expect(calls("mcpServer/tool/call")[0].params).toMatchObject({ server: "cua_repl", tool: "js" })
+    expect(calls("mcpServer/tool/call")[0].params.arguments).toEqual({ code: "1 + 1", timeout_ms: 10_000 })
   })
 
   test("prepends the code prefix and reports traffic", async () => {
@@ -148,6 +152,14 @@ describe("ComputerUseBridge", () => {
     expect(text(result)).toBe("elicitation:decline")
     expect(result.notes[0]).toContain('needs permission to use "Calculator"')
     expect(result.notes[0]).toContain('approval_policy = "never"')
+  })
+
+  test("accepts forwarded prompts when appAccess is accept", async () => {
+    const { bridge, logs } = setup({ appAccess: "accept" })
+    const result = await bridge.run("ses_a", "ELICIT")
+    expect(text(result)).toBe("elicitation:accept")
+    expect(result.notes).toEqual([])
+    expect(logs.some((line) => line.startsWith('accepted: Allow Computer Use to use "Calculator"'))).toBe(true)
   })
 
   test("reads the Codex approval policy", async () => {
